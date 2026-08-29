@@ -2569,9 +2569,14 @@ body { overscroll-behavior: none; }
   position: fixed;
   z-index: 120;
   inset: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
   padding: 24px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   background:
     radial-gradient(circle at 50% 36%, rgba(41,139,91,.28), transparent 38%),
     linear-gradient(150deg, rgba(4,11,8,.96), rgba(6,18,12,.985));
@@ -2587,6 +2592,8 @@ body { overscroll-behavior: none; }
 }
 .menu-card {
   position: relative;
+  flex: 0 0 auto;
+  margin-block: auto;
   width: min(520px, calc(100vw - 48px));
   padding: 34px 38px 30px;
   border: 1px solid rgba(239,215,145,.24);
@@ -2838,7 +2845,7 @@ body { overscroll-behavior: none; }
   .top-actions { display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px !important; align-items:stretch; }
   .speed-control { grid-column:1/-1; display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:7px; }
   .speed-control span { font-size:8px; }
-  .speed-control select { width:100%; min-width:0; padding:7px 9px; }
+  .speed-control select { width:100%; min-width:0; min-height:40px; padding:7px 9px; }
   .phase-chip, .network-pill { min-height:31px; justify-content:center; padding:5px 7px; font-size:8px; }
   .ghost-button { min-height:35px; padding:7px 8px; font-size:10px; white-space:nowrap; }
   /* On phones the utility controls live below the felt, leaving the table tall. */
@@ -2846,7 +2853,7 @@ body { overscroll-behavior: none; }
   .top-actions > .phase-chip { grid-column:1/-1; }
   .mobile-table-tools { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; padding:5px 7px 7px; }
   .mobile-table-tool {
-    min-height:38px; padding:6px 5px; border:1px solid rgba(227,202,134,.2); border-radius:10px;
+    min-height:44px; padding:8px 5px; border:1px solid rgba(227,202,134,.2); border-radius:10px;
     background:linear-gradient(180deg,rgba(25,43,34,.98),rgba(12,24,18,.98)); color:#d8e3da;
     font:inherit; font-size:9px; font-weight:700; line-height:1.15; text-align:center;
   }
@@ -2863,13 +2870,26 @@ body { overscroll-behavior: none; }
   .objective-main { margin-top:3px; gap:5px; font-size:13px; }
   .objective-sub { margin-top:3px; font-size:9px; line-height:1.3; }
   .skat-pile .card-back { width:55px !important; height:77px !important; }
+  .table-human-hand, .human-hand {
+    width:min(100%,680px) !important;
+    box-sizing:border-box;
+  }
+  .table-human-hand .card, .human-hand .card {
+    width:82px !important;
+    height:118px !important;
+    margin-left:-24px !important;
+  }
+  .table-human-hand .card:first-child, .human-hand .card:first-child { margin-left:0 !important; }
   .action-bar { width:calc(100% - 14px) !important; padding:6px 8px !important; border-radius:12px !important; }
   .controls { gap:6px !important; min-height:0; }
-  .action { min-height:42px !important; padding:8px 11px !important; border-radius:9px !important; font-size:12px !important; }
+  .action { min-height:44px !important; padding:8px 11px !important; border-radius:9px !important; font-size:12px !important; }
+  .icon-button { width:44px; height:44px; }
+  .select-row select, .menu-language select { min-height:44px; }
+  .toggle-row input { width:22px; height:22px; flex:0 0 auto; }
   .helper-head { padding:11px 12px 9px; }
   .helper-head strong { font-size:17px; }
   .helper-tabs { padding:7px 9px; gap:5px; }
-  .helper-tab { padding:7px 4px; font-size:9px; }
+  .helper-tab { min-height:44px; padding:7px 4px; font-size:9px; }
   .helper-pane { padding:10px; max-height:420px; }
   .helper-objective { padding:11px; border-radius:12px; }
   .helper-explainer { margin-top:9px; padding:10px; border-radius:11px; }
@@ -2921,7 +2941,7 @@ body { overscroll-behavior: none; }
   .slot-right { right:28% !important; top:33% !important; }
   .slot-bottom { bottom:25% !important; }
   .action-bar { width:calc(100% - 10px) !important; }
-  .action { min-height:40px !important; padding:7px 9px !important; font-size:11px !important; }
+  .action { min-height:44px !important; padding:8px 9px !important; font-size:11px !important; }
   .settings-card, .result-card, .tutorial-card, .new-game-card, .multiplayer-card { padding:14px; border-radius:14px; }
   .settings-card h2, .result-card h2, .tutorial-head h2 { font-size:22px; }
   .tutorial-visual { min-height:96px; font-size:40px; }
@@ -2952,7 +2972,7 @@ body { overscroll-behavior: none; }
   .phase-chip, .network-pill { min-height:28px; font-size:7px; }
   .ghost-button { min-height:30px; padding:6px 6px; font-size:8px; }
   .mobile-table-tools { gap:4px; padding:4px 5px 5px; }
-  .mobile-table-tool { min-height:34px; padding:5px 3px; border-radius:8px; font-size:8px; }
+  .mobile-table-tool { min-height:44px; padding:7px 3px; border-radius:8px; font-size:9px; }
   .table-stage { min-height:clamp(540px,calc(100svh - 145px),640px) !important; }
   .table-stage .felt-table, .felt-table { inset:38px 2px 46px !important; border-width:4px 5px 7px !important; }
   .center-brand { font-size:27px; }
@@ -2980,7 +3000,7 @@ body { overscroll-behavior: none; }
     top:4px !important; width:30px !important; height:43px !important;
   }
   .table-human-hand, .human-hand { bottom:18px !important; height:94px !important; min-height:94px !important; padding:0 5px 1px; }
-  .table-human-hand .card, .human-hand .card { width:54px !important; height:78px !important; margin-left:-20px !important; border-radius:6px; }
+  .table-human-hand .card, .human-hand .card { width:52px !important; height:78px !important; margin-left:-25px !important; border-radius:6px; }
   .card .corner b { font-size:12px !important; }
   .card .corner i { font-size:10px !important; }
   .card .corner.top { top:4px; left:4px; }
@@ -2996,13 +3016,37 @@ body { overscroll-behavior: none; }
   .slot-bottom { bottom:23% !important; }
   .action-bar { width:calc(100% - 8px) !important; padding:5px 6px !important; }
   .controls { gap:4px !important; }
-  .action { min-height:38px !important; padding:6px 8px !important; font-size:10px !important; }
+  .action { min-height:44px !important; padding:8px 8px !important; font-size:10px !important; }
   .helper-head { padding:9px 10px 7px; }
   .helper-head strong { font-size:15px; }
   .helper-head .eyebrow { font-size:7px; }
   .helper-tabs { padding:5px 7px; gap:4px; }
   .helper-tab { padding:6px 3px; font-size:8px; }
   .helper-pane { padding:8px; max-height:340px; }
+}
+
+@media (max-width: 340px) {
+  .table-human-hand .card, .human-hand .card {
+    width:50px !important;
+    height:76px !important;
+    margin-left:-25px !important;
+  }
+}
+
+/* Keep this after the width breakpoints: landscape phones otherwise inherit
+   the taller portrait menu sizes declared above. */
+@media (max-height: 480px) {
+  .main-menu { padding:8px 12px; }
+  .main-menu::before { inset:4px; border-width:5px; }
+  .menu-card { width:min(520px,calc(100vw - 24px)); padding:14px 18px 12px; }
+  .menu-mark { width:36px; height:36px; margin-bottom:5px; font-size:18px; }
+  .menu-card h2 { font-size:26px; }
+  .menu-subtitle { margin:5px 0 9px; }
+  .menu-actions { gap:6px; }
+  .menu-button { min-height:44px; padding:7px 11px; font-size:13px; }
+  .menu-language { grid-template-columns:1fr 170px; margin-top:8px; padding-top:8px; gap:8px; }
+  .menu-language select { min-height:44px; padding:7px 9px; }
+  .menu-session-info { margin-top:7px; }
 }
 
 </style>

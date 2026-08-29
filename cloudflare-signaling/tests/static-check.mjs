@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-const html = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+const html = fs.readFileSync(new URL("../../index.html", import.meta.url), "utf8");
 const failures = [];
 
 for (const forbidden of [
