@@ -94,11 +94,13 @@ async function playHands(page, targetHands, botSeat, difficulty) {
       const B = S.bot;
       const humanSeats = new Set([0, humanSeat]);
 
+      const capturedIds = new Set(s.captured.flat().map((card) => card?.id).filter(Boolean));
+      const unsettledTrickCards = (s.trick?.cards || []).map((entry) => entry.card).filter((card) => !capturedIds.has(card?.id));
       const zones = [
         ...s.hands.flat(),
         ...s.skat,
         ...s.captured.flat(),
-        ...(s.trick?.cards || []).map((entry) => entry.card),
+        ...unsettledTrickCards,
       ];
       const ids = zones.map((card) => card?.id).filter(Boolean);
       if (ids.length !== 32 || new Set(ids).size !== 32) {
