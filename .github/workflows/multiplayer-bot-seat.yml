@@ -14,7 +14,7 @@ permissions:
 jobs:
   patch-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,8 +35,8 @@ jobs:
       - name: Install browser test driver
         run: npm install --no-save --no-package-lock playwright-core@1.55.0
 
-      - name: Run Playwright stress and viewport tests
-        run: node tests/multiplayer_bot_playwright.mjs
+      - name: Run hybrid multiplayer smoke agent
+        run: node tests/multiplayer_bot_smoke.mjs
 
       - name: Commit patched game file
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
