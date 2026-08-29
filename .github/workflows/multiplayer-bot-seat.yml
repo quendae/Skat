@@ -1,53 +1,32 @@
-name: Multiplayer bot seat patch
+name: Hybrid multiplayer bot test
 
 on:
   push:
     branches:
+      - main
       - feature/multiplayer-bot-seat
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch-and-test:
+  playwright:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Apply multiplayer bot patch
-        run: node tools/apply_multiplayer_bot_patch.mjs
-
-      - name: Check patch formatting
-        run: git diff --check
-
       - name: Install browser test driver
         run: npm install --no-save --no-package-lock playwright-core@1.55.0
 
       - name: Run hybrid multiplayer smoke agent
         run: node tests/multiplayer_bot_smoke.mjs
-
-      - name: Commit patched game file
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-        shell: bash
-        run: |
-          if git diff --quiet -- index.html; then
-            echo "index.html already patched"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add index.html
-          git commit -m "Add configurable bot seat to multiplayer [skip ci]"
-          git push origin HEAD:${{ github.head_ref || github.ref_name }}
