@@ -36,6 +36,8 @@
     stateSeq: 0,
     queued: false,
     quickPlay: false,
+    botSeats: [],
+    fillBot: false,
     rooms: [],
     lastError: '',
   };
@@ -105,6 +107,38 @@
     }
   };
   const copy = () => COPY[language()] || COPY.pl;
+
+  const HYBRID_COPY = {
+    pl: { botName: 'Bot', addBot: 'Dodaj bota', removeBot: 'Usuń bota', botStatus: 'Bot · sterowany przez gospodarza', twoHumans: 'Dwóch graczy jest gotowych. Możesz poczekać na trzecią osobę albo dodać bota.', hybridReady: '2 graczy + bot. Można rozpocząć grę.', connectionLost: (name) => 'Utracono połączenie z graczem ' + name + '. Czekamy na jego powrót.', connectionRestored: (name) => 'Połączenie gracza ' + name + ' zostało wznowione.', leftGame: (name) => 'Gracz ' + name + ' opuścił grę.' },
+    en: { botName: 'Bot', addBot: 'Add bot', removeBot: 'Remove bot', botStatus: 'Bot · controlled by host', twoHumans: 'Two players are ready. Wait for a third player or add a bot.', hybridReady: '2 players + bot. Ready to start.', connectionLost: (name) => 'Connection to ' + name + ' was lost. Waiting for them to return.', connectionRestored: (name) => name + ' reconnected.', leftGame: (name) => name + ' left the game.' },
+    de: { botName: 'Bot', addBot: 'Bot hinzufügen', removeBot: 'Bot entfernen', botStatus: 'Bot · vom Gastgeber gesteuert', twoHumans: 'Zwei Spieler sind bereit. Warte auf einen dritten Spieler oder füge einen Bot hinzu.', hybridReady: '2 Spieler + Bot. Spiel kann gestartet werden.', connectionLost: (name) => 'Verbindung zu ' + name + ' verloren. Wir warten auf die Rückkehr.', connectionRestored: (name) => name + ' ist wieder verbunden.', leftGame: (name) => name + ' hat das Spiel verlassen.' },
+    es: { botName: 'Bot', addBot: 'Añadir bot', removeBot: 'Quitar bot', botStatus: 'Bot · controlado por el anfitrión', twoHumans: 'Hay dos jugadores listos. Espera al tercero o añade un bot.', hybridReady: '2 jugadores + bot. Listos para empezar.', connectionLost: (name) => 'Se perdió la conexión con ' + name + '. Esperando su regreso.', connectionRestored: (name) => name + ' se ha reconectado.', leftGame: (name) => name + ' abandonó la partida.' },
+    fr: { botName: 'Bot', addBot: 'Ajouter un bot', removeBot: 'Retirer le bot', botStatus: 'Bot · contrôlé par l’hôte', twoHumans: 'Deux joueurs sont prêts. Attendez un troisième joueur ou ajoutez un bot.', hybridReady: '2 joueurs + bot. Prêt à démarrer.', connectionLost: (name) => 'Connexion avec ' + name + ' perdue. En attente de son retour.', connectionRestored: (name) => name + ' est reconnecté.', leftGame: (name) => name + ' a quitté la partie.' },
+  };
+  const hybridCopy = () => HYBRID_COPY[language()] || HYBRID_COPY.pl;
+
+  let eventToastTimer = null;
+  function showEventToast(message, tone = 'info') {
+    if (!message) return;
+    let node = el('mp-event-toast');
+    if (!node) {
+      node = document.createElement('div');
+      node.id = 'mp-event-toast';
+      node.setAttribute('role', 'status');
+      node.setAttribute('aria-live', 'polite');
+      Object.assign(node.style, { position: 'fixed', top: '18px', left: '50%', transform: 'translateX(-50%) translateY(-8px)', zIndex: '99999', maxWidth: 'min(620px, calc(100vw - 28px))', padding: '11px 16px', borderRadius: '12px', border: '1px solid rgba(216,179,95,.45)', background: 'rgba(8,17,13,.96)', color: '#edf5ef', boxShadow: '0 14px 38px rgba(0,0,0,.42)', fontSize: '13px', fontWeight: '750', textAlign: 'center', opacity: '0', pointerEvents: 'none', transition: 'opacity .18s ease, transform .18s ease' });
+      document.body.appendChild(node);
+    }
+    node.textContent = message;
+    node.style.borderColor = tone === 'danger' ? 'rgba(255,143,143,.68)' : tone === 'success' ? 'rgba(130,220,160,.58)' : 'rgba(216,179,95,.45)';
+    node.style.opacity = '1';
+    node.style.transform = 'translateX(-50%) translateY(0)';
+    if (eventToastTimer) window.clearTimeout(eventToastTimer);
+    eventToastTimer = window.setTimeout(() => {
+      node.style.opacity = '0';
+      node.style.transform = 'translateX(-50%) translateY(-8px)';
+    }, 4500);
+  }
 
   function normalizeNick(value) {
     return String(value || '').normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/g, '').replace(/\s+/g, ' ').trim();
@@ -329,7 +363,15 @@
     mp.hostSessionId = room.ownerSessionId;
     mp.seat = mp.session ? seatForSession(mp.session.id) : null;
     mp.role = mp.session?.id === room.ownerSessionId ? 'host' : 'guest';
-    mp.names = [0, 1, 2].map((seat) => room.players?.[seat]?.nickname || '');
+    if (room.status === 'in_game' && room.players.length < 3 && mp.botSeats.length === 0) {
+      mp.botSeats = Array.from({ length: 3 - room.players.length }, (_, index) => room.players.length + index);
+      mp.fillBot = mp.botSeats.length > 0;
+    }
+    if (room.status !== 'in_game' && room.players.length >= 3) {
+      mp.fillBot = false;
+      mp.botSeats = [];
+    }
+    mp.names = [0, 1, 2].map((seat) => room.players?.[seat]?.nickname || (mp.botSeats.includes(seat) ? hybridCopy().botName : ''));
 
     if (mp.inGame && previousHost && previousHost !== room.ownerSessionId) {
       networkInterrupted('Gospodarz opuścił grę. To rozdanie nie może być bezpiecznie kontynuowane.');
@@ -355,7 +397,7 @@
 
   function broadcastLobby() {
     if (mp.role !== 'host' || !mp.roomObj) return;
-    roomSend({ type: 'skat.lobby', names: mp.names });
+    roomSend({ type: 'skat.lobby', names: mp.names, fillBot: mp.fillBot });
   }
 
   function handleRoomMessage(message) {
@@ -363,6 +405,7 @@
     const payload = message.payload;
     if (payload.type === 'skat.lobby' && mp.role === 'guest' && !mp.inGame) {
       if (Array.isArray(payload.names)) mp.names = payload.names.slice(0, 3);
+      mp.fillBot = !!payload.fillBot;
       renderLobby();
       return;
     }
@@ -431,6 +474,8 @@
       return;
     }
     if (message.type === 'game.started') {
+      mp.botSeats = Array.isArray(message.botSeats) ? message.botSeats.filter(Number.isInteger) : [];
+      mp.fillBot = mp.botSeats.length > 0;
       if (message.room?.game === GAME_ID) syncRoom(message.room);
       return;
     }
@@ -441,7 +486,20 @@
       return;
     }
     if (message.type === 'game.state') {
+      if (Array.isArray(message.botSeats)) {
+        mp.botSeats = message.botSeats.filter(Number.isInteger);
+        mp.fillBot = mp.botSeats.length > 0;
+      }
       if (message.roomId === mp.room) applyRemoteState(message.state, message.revision);
+      return;
+    }
+    if (message.type === 'game.player.connection' && message.roomId === mp.room && message.sessionId !== mp.session?.id) {
+      const text = message.connected ? hybridCopy().connectionRestored(message.nickname || 'gracz') : hybridCopy().connectionLost(message.nickname || 'gracz');
+      showEventToast(text, message.connected ? 'success' : 'danger');
+      return;
+    }
+    if (message.type === 'game.player.left' && message.roomId === mp.room && message.sessionId !== mp.session?.id) {
+      showEventToast(hybridCopy().leftGame(message.nickname || 'gracz'), 'danger');
       return;
     }
     if (message.type === 'game.ended') {
@@ -488,6 +546,17 @@
     setText('mp-copy-room', c.copyRoom);
     setText('mp-leave-button', c.leave);
     setText('mp-start-button', c.start);
+    const footer = el('mp-start-button')?.parentElement;
+    if (footer && !el('mp-toggle-bot')) {
+      const botButton = document.createElement('button');
+      botButton.type = 'button';
+      botButton.id = 'mp-toggle-bot';
+      botButton.className = 'action secondary';
+      botButton.dataset.action = 'mp-toggle-bot';
+      botButton.textContent = hybridCopy().addBot;
+      botButton.style.display = 'none';
+      footer.insertBefore(botButton, el('mp-start-button'));
+    }
 
     ['mp-host-password', 'mp-guest-password'].forEach((id) => {
       const input = el(id);
@@ -590,23 +659,37 @@
     const seats = el('mp-lobby-seats');
     if (seats) {
       seats.innerHTML = [0, 1, 2].map((seat) => {
-        const player = mp.roomObj?.players?.[seat];
+        const humanCount = mp.roomObj?.players?.length || 0;
+        const isBot = mp.botSeats.includes(seat) || (mp.fillBot && humanCount === 2 && seat === 2);
+        const player = isBot ? null : mp.roomObj?.players?.[seat];
         const isSelf = player?.id === mp.session?.id;
-        const isHost = player?.id === mp.hostSessionId || seat === 0;
-        const name = player?.nickname || copy().waiting;
-        const connected = !!player?.connected;
-        const status = isHost ? `${copy().host}${connected ? '' : ` · ${copy().offline}`}` : (connected ? copy().connected : (player ? copy().offline : copy().waiting));
+        const isHost = player?.id === mp.hostSessionId || (seat === 0 && !isBot);
+        const name = isBot ? hybridCopy().botName : (player?.nickname || copy().waiting);
+        const connected = isBot || !!player?.connected;
+        const status = isBot ? hybridCopy().botStatus : (isHost ? `${copy().host}${connected ? '' : ` · ${copy().offline}`}` : (connected ? copy().connected : (player ? copy().offline : copy().waiting)));
         return `<div class="lobby-seat ${connected ? 'connected' : ''}"><b>${escapeHtml(name)}${isSelf ? ' · Ty' : ''}</b><small>${escapeHtml(status)}</small></div>`;
       }).join('');
     }
-    const ready = mp.role === 'host' && mp.roomObj?.players?.length === 3 && mp.roomObj.players.every((player) => player.connected);
+    const humans = mp.roomObj?.players || [];
+    const allHumansConnected = humans.length > 0 && humans.every((player) => player.connected);
+    const fullHumanReady = humans.length === 3 && allHumansConnected;
+    const hybridReady = humans.length === 2 && mp.fillBot && allHumansConnected;
+    const ready = mp.role === 'host' && (fullHumanReady || hybridReady);
     const start = el('mp-start-button');
     if (start) {
       start.disabled = !ready;
       start.classList.toggle('disabled', !ready);
       start.classList.toggle('primary', ready);
     }
-    setStatus('mp-lobby-status', ready ? copy().roomFull : copy().roomReady);
+    const botButton = el('mp-toggle-bot');
+    if (botButton) {
+      const show = mp.role === 'host' && !mp.inGame && humans.length === 2;
+      botButton.style.display = show ? '' : 'none';
+      botButton.textContent = mp.fillBot ? hybridCopy().removeBot : hybridCopy().addBot;
+      botButton.classList.toggle('primary', !!mp.fillBot);
+    }
+    const lobbyText = ready ? (hybridReady ? hybridCopy().hybridReady : copy().roomFull) : (humans.length === 2 && !mp.fillBot ? hybridCopy().twoHumans : copy().roomReady);
+    setStatus('mp-lobby-status', lobbyText);
   }
 
   async function createRoom() {
@@ -724,6 +807,8 @@
     mp.stateSeq = 0;
     mp.queued = false;
     mp.quickPlay = false;
+    mp.botSeats = [];
+    mp.fillBot = false;
     const state = Skat.game?.state;
     if (state) {
       state.multiplayer = false;
@@ -812,10 +897,15 @@
   }
 
   async function startGame() {
-    const ready = mp.role === 'host' && mp.roomObj?.players?.length === 3 && mp.roomObj.players.every((player) => player.connected);
+    const humans = mp.roomObj?.players || [];
+    const botCount = humans.length === 2 && mp.fillBot ? 1 : 0;
+    const ready = mp.role === 'host' && humans.every((player) => player.connected) && humans.length + botCount === 3;
     if (!ready || mp.inGame) return;
     try {
-      await request({ type: 'game.start', roomId: mp.room }, 'game.started', (message) => message.room?.id === mp.room);
+      const started = await request({ type: 'game.start', roomId: mp.room, botCount }, 'game.started', (message) => message.room?.id === mp.room);
+      mp.botSeats = Array.isArray(started.botSeats) ? started.botSeats.filter(Number.isInteger) : [];
+      mp.fillBot = mp.botSeats.length > 0;
+      mp.names = [0, 1, 2].map((seat) => humans[seat]?.nickname || (mp.botSeats.includes(seat) ? hybridCopy().botName : ''));
       mp.inGame = true;
       mp.quickPlay = false;
       const state = Skat.game?.state;
@@ -864,7 +954,7 @@
     }
     const modalActions = new Set([
       'menu-multiplayer','close-multiplayer','mp-create-room','mp-make-offer','mp-copy-room','mp-leave','mp-start-game',
-      'mp-refresh-rooms','mp-quick-play'
+      'mp-refresh-rooms','mp-quick-play','mp-toggle-bot'
     ]);
     if (modalActions.has(action)) {
       if (action === 'menu-multiplayer') openModal();
@@ -876,6 +966,14 @@
       else if (action === 'mp-start-game') startGame();
       else if (action === 'mp-refresh-rooms') refreshRooms();
       else if (action === 'mp-quick-play') toggleQuickPlay();
+      else if (action === 'mp-toggle-bot') {
+        if (mp.role === 'host' && !mp.inGame && mp.roomObj?.players?.length === 2) {
+          mp.fillBot = !mp.fillBot;
+          mp.botSeats = [];
+          renderLobby();
+          broadcastLobby();
+        }
+      }
       return true;
     }
     const routed = GAME_ACTIONS.has(action) || action.startsWith('declare-') || action.startsWith('select-hand-');
@@ -918,7 +1016,7 @@
     handleCardPlay,
     afterRender,
     isGameActive: () => mp.inGame,
-    isBotSeat: () => false,
+    isBotSeat: (seat) => mp.botSeats.includes(seat),
     debug: () => mp,
     debugRenderLobby: renderLobby,
     debugStartGame: startGame,
