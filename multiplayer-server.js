@@ -489,7 +489,7 @@
       label.className = 'multiplayer-field';
       label.innerHTML = `<span>${escapeHtml(c.visibility)}</span><select id="mp-room-visibility" style="width:100%;padding:11px 12px;border:1px solid rgba(255,255,255,.13);border-radius:10px;color:#edf5ef;background:#0b1711"><option value="public">${escapeHtml(c.publicRoom)}</option><option value="private">${escapeHtml(c.privateRoom)}</option></select><small style="text-transform:none;letter-spacing:0;font-weight:500;color:#82948a">${escapeHtml(c.visibilityHelp)}</small>`;
       const button = el('mp-create-button');
-      if (button) createSection.insertBefore(label, button);
+      if (button) createSection.insertBefore(label, button.closest('.multiplayer-actions') || button);
       else createSection.appendChild(label);
     }
 
