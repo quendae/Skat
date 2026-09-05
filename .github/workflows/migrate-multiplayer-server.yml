@@ -5,7 +5,7 @@ on:
     paths:
       - '.github/workflows/migrate-multiplayer-server.yml'
       - 'scripts/migrate-multiplayer-server.mjs'
-      - 'scripts/add-hybrid-bot-presence.mjs'
+      - 'scripts/add-hybrid-bot-presence-v2.mjs'
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
       - name: Apply multiplayer migration/update
         run: |
           node scripts/migrate-multiplayer-server.mjs
-          node scripts/add-hybrid-bot-presence.mjs
+          node scripts/add-hybrid-bot-presence-v2.mjs
       - name: Verify migration markers and syntax
         run: |
           grep -q '<script src="./multiplayer-server.js"></script>' index.html
