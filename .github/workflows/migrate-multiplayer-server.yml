@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.github/workflows/migrate-multiplayer-server.yml'
+      - 'scripts/migrate-multiplayer-server.mjs'
   workflow_dispatch:
 
 permissions:
@@ -17,14 +18,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Replace legacy WebRTC client
+      - name: Apply multiplayer migration/update
         run: node scripts/migrate-multiplayer-server.mjs
-      - name: Verify migration markers
+      - name: Verify migration markers and syntax
         run: |
           grep -q '<script src="./multiplayer-server.js"></script>' index.html
           ! grep -q 'const RTC_CONFIG' index.html
           grep -q 'wss://api.qqnd.fyi/api/v1/ws' multiplayer-server.js
-      - name: Commit migrated index
+          node --check multiplayer-server.js
+      - name: Commit generated migration changes
         run: |
           if git diff --quiet; then
             echo 'No migration changes needed.'
@@ -32,6 +34,6 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add index.html
-          git commit -m 'feat: migrate Skat multiplayer to QQND server [skip ci]'
+          git add index.html multiplayer-server.js
+          git commit -m 'fix: apply Skat multiplayer migration updates [skip ci]'
           git push
