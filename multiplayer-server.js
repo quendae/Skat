@@ -366,15 +366,7 @@
       renderLobby();
       return;
     }
-    if (payload.type === 'skat.action' && mp.role === 'host' && mp.inGame) {
-      const seat = seatForSession(message.fromSessionId);
-      if (seat <= 0 || seat > 2) return;
-      Skat.game?.executePlayerAction?.(seat, payload.action, payload.payload || {});
-      return;
-    }
-    if (payload.type === 'skat.state' && mp.role === 'guest') {
-      applyRemoteState(payload.state, payload.seq);
-    }
+
   }
 
   function handleServerMessage(message) {
@@ -389,7 +381,10 @@
     if (message.type === 'session.resumed') {
       mp.session = message.session;
       const skatRoom = (message.rooms || []).find((room) => room.game === GAME_ID);
-      if (skatRoom) syncRoom(skatRoom);
+      if (skatRoom) {
+        syncRoom(skatRoom);
+        if (skatRoom.status === 'in_game') socketSend({ type: 'game.state.get', roomId: skatRoom.id });
+      }
       return;
     }
     if (message.type === 'room.created' || message.type === 'room.joined' || message.type === 'room.updated') {
@@ -433,6 +428,24 @@
     }
     if (message.type === 'room.message') {
       handleRoomMessage(message);
+      return;
+    }
+    if (message.type === 'game.started') {
+      if (message.room?.game === GAME_ID) syncRoom(message.room);
+      return;
+    }
+    if (message.type === 'game.action') {
+      if (mp.role === 'host' && mp.inGame && message.roomId === mp.room && Number.isInteger(message.seat)) {
+        Skat.game?.executePlayerAction?.(message.seat, message.action, message.payload || {});
+      }
+      return;
+    }
+    if (message.type === 'game.state') {
+      if (message.roomId === mp.room) applyRemoteState(message.state, message.revision);
+      return;
+    }
+    if (message.type === 'game.ended') {
+      if (message.roomId === mp.room) networkInterrupted('Gra została zakończona, ponieważ gracz opuścił stół.');
       return;
     }
     if (message.type === 'error') {
@@ -722,9 +735,13 @@
   function mapPlayer(value, order) { return Number.isInteger(value) ? order.indexOf(value) : value; }
   function hiddenHand(player, count) { return Array.from({ length: count }, (_, index) => ({ id: `hidden-${player}-${index}`, suit: 'C', rank: '7' })); }
 
+  function cloneGameState(state) {
+    return JSON.parse(JSON.stringify(state, (key, value) => value instanceof Set ? [...value] : (key === 'botTimer' || key === 'cardFlight' ? null : value)));
+  }
+
   function stateForSeat(state, seat) {
     const order = [seat, (seat + 1) % 3, (seat + 2) % 3];
-    const clone = JSON.parse(JSON.stringify(state, (key, value) => value instanceof Set ? [...value] : (key === 'botTimer' || key === 'cardFlight' ? null : value)));
+    const clone = cloneGameState(state);
     const visibleHands = state.hands.map((hand, player) => {
       const openlyShown = state.contract?.ouvert && state.declarer === player && ['kontra', 'play', 'hand-end'].includes(state.phase);
       return player === seat || openlyShown ? hand.map((card) => ({ ...card })) : hiddenHand(player, hand.length);
@@ -762,14 +779,15 @@
     const state = Skat.game?.state;
     if (!state) return;
     mp.stateSeq += 1;
+    socketSend({ type: 'game.state.commit', roomId: mp.room, revision: mp.stateSeq, state: cloneGameState(state) });
     mp.roomObj.players.forEach((player, seat) => {
       if (player.id === mp.session?.id || seat < 1 || seat > 2 || !player.connected) return;
-      roomSend({ type: 'skat.state', seq: mp.stateSeq, state: stateForSeat(state, seat) }, player.id);
+      socketSend({ type: 'game.state.publish', roomId: mp.room, revision: mp.stateSeq, toSessionId: player.id, state: stateForSeat(state, seat) });
     });
   }
 
   function applyRemoteState(snapshot, seq) {
-    if (mp.role !== 'guest' || !snapshot || !Number.isFinite(seq) || seq <= mp.stateSeq) return;
+    if (!snapshot || !Number.isFinite(seq) || seq <= mp.stateSeq) return;
     mp.stateSeq = seq;
     mp.inGame = true;
     const state = Skat.game?.state;
@@ -793,21 +811,26 @@
     updateNetworkPill(true);
   }
 
-  function startGame() {
+  async function startGame() {
     const ready = mp.role === 'host' && mp.roomObj?.players?.length === 3 && mp.roomObj.players.every((player) => player.connected);
     if (!ready || mp.inGame) return;
-    mp.inGame = true;
-    mp.quickPlay = false;
-    const state = Skat.game?.state;
-    if (!state) return;
-    state.multiplayer = true;
-    state.playerNames = [...mp.names];
-    state.tutorialMode = false;
-    Skat.game.hideMainMenu();
-    el('multiplayer-modal')?.classList.add('hidden');
-    Skat.game.resetMatch();
-    updateNetworkPill(true);
-    window.setTimeout(broadcastState, 0);
+    try {
+      await request({ type: 'game.start', roomId: mp.room }, 'game.started', (message) => message.room?.id === mp.room);
+      mp.inGame = true;
+      mp.quickPlay = false;
+      const state = Skat.game?.state;
+      if (!state) return;
+      state.multiplayer = true;
+      state.playerNames = [...mp.names];
+      state.tutorialMode = false;
+      Skat.game.hideMainMenu();
+      el('multiplayer-modal')?.classList.add('hidden');
+      Skat.game.resetMatch();
+      updateNetworkPill(true);
+      window.setTimeout(broadcastState, 0);
+    } catch (error) {
+      setStatus('mp-lobby-status', friendlyError(error), true);
+    }
   }
 
   function networkInterrupted(customMessage) {
@@ -829,9 +852,9 @@
     if (brand && mp.inGame) brand.textContent = `MULTIPLAYER · ${mp.room}`;
   }
 
-  function sendGuestAction(action, payload = {}) {
-    if (mp.role !== 'guest' || !mp.hostSessionId || mp.socket?.readyState !== WebSocket.OPEN) return;
-    roomSend({ type: 'skat.action', action, payload, id: `${Date.now()}-${Math.random().toString(36).slice(2)}` }, mp.hostSessionId);
+  function sendGameAction(action, payload = {}) {
+    if (!mp.inGame || !mp.room || mp.socket?.readyState !== WebSocket.OPEN) return;
+    socketSend({ type: 'game.action', roomId: mp.room, action, payload, actionId: `${Date.now()}-${Math.random().toString(36).slice(2)}` });
   }
 
   function handleGameAction(action, state) {
@@ -856,18 +879,18 @@
       return true;
     }
     const routed = GAME_ACTIONS.has(action) || action.startsWith('declare-') || action.startsWith('select-hand-');
-    if (mp.role !== 'guest' || !mp.inGame || !routed) return false;
+    if (!mp.inGame || !routed) return false;
     if (action === 'confirm-discard') {
-      sendGuestAction(action, { cardIds: [...(state.selectedDiscard || [])] });
+      sendGameAction(action, { cardIds: [...(state.selectedDiscard || [])] });
       return true;
     }
-    sendGuestAction(action);
+    sendGameAction(action);
     return true;
   }
 
   function handleCardPlay(cardId) {
-    if (mp.role !== 'guest' || !mp.inGame) return false;
-    sendGuestAction('play-card', { cardId });
+    if (!mp.inGame) return false;
+    sendGameAction('play-card', { cardId });
     return true;
   }
 
