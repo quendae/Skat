@@ -16,9 +16,13 @@ for (const [needle, label] of [
   ["type: 'room.join'", 'room join'],
   ["type: 'rooms.list'", 'room browser'],
   ["type: 'queue.join'", 'Quick Play'],
-  ["type: 'room.send'", 'authenticated room relay'],
-  ["type: 'skat.state'", 'targeted game state'],
+  ["type: 'room.send'", 'authenticated lobby relay'],
+  ["type: 'game.start'", 'server-approved game start'],
+  ["type: 'game.action'", 'server action routing'],
+  ["type: 'game.state.commit'", 'canonical state commit'],
+  ["type: 'game.state.publish'", 'seat-private state publication'],
   ['stateForSeat', 'seat-private state projection'],
+  ['cloneGameState', 'serializable canonical state'],
 ]) if (!client.includes(needle)) throw new Error(`Missing ${label}`);
 if (/RTCPeerConnection|stun\.l\.google\.com|\/api\/rooms\//.test(client)) throw new Error('Legacy WebRTC/signaling code is still present in multiplayer-server.js');
 
@@ -52,8 +56,8 @@ await page.addInitScript(() => {
   const OTHER_2 = '33333333-3333-4333-8333-333333333333';
   const now = Date.now();
   const player = (id, nickname) => ({ id, nickname, connected: true, createdAt: now, lastSeenAt: now, joinedAt: now });
-  const fullRoom = () => ({
-    id: 'TEST-ROOM', game: 'skat', name: 'Smoke Skat', visibility: 'private', source: 'quickplay', status: 'ready',
+  const fullRoom = (status = 'ready') => ({
+    id: 'TEST-ROOM', game: 'skat', name: 'Smoke Skat', visibility: 'private', source: 'quickplay', status,
     ownerSessionId: SESSION_ID, minPlayers: 3, maxPlayers: 3,
     players: [player(SESSION_ID, 'Tester'), player(OTHER_1, 'Alice'), player(OTHER_2, 'Bob')], createdAt: now, updatedAt: now,
   });
@@ -77,7 +81,7 @@ await page.addInitScript(() => {
       const message = JSON.parse(raw);
       window.__wsFrames.push(message);
       const emit = (payload) => setTimeout(() => this.onmessage?.({ data: JSON.stringify(payload) }), 0);
-      if (message.type === 'rooms.list') emit({ type: 'rooms.list', rooms: [{ ...fullRoom(), id: 'OPEN-ROOM', visibility: 'public', source: 'manual', status: 'waiting', players: [player(OTHER_1, 'Alice')] }] });
+      if (message.type === 'rooms.list') emit({ type: 'rooms.list', rooms: [{ ...fullRoom('waiting'), id: 'OPEN-ROOM', visibility: 'public', source: 'manual', players: [player(OTHER_1, 'Alice')] }] });
       if (message.type === 'session.create') emit({ type: 'session.created', session: player(SESSION_ID, message.nickname), resumeToken: 'x'.repeat(64) });
       if (message.type === 'queue.join') {
         emit({ type: 'queue.joined', game: 'skat', position: 1 });
@@ -85,6 +89,15 @@ await page.addInitScript(() => {
       }
       if (message.type === 'queue.leave') emit({ type: 'queue.left', game: 'skat', removed: true });
       if (message.type === 'room.leave') emit({ type: 'room.left', roomId: message.roomId });
+      if (message.type === 'game.start') {
+        emit({ type: 'game.started', game: 'skat', room: fullRoom('in_game'), seat: 0, hostSessionId: SESSION_ID, revision: 0 });
+      }
+      if (message.type === 'game.action') {
+        emit({ type: 'game.action', roomId: message.roomId, game: 'skat', fromSessionId: SESSION_ID, seat: 0, actionSeq: 1, actionId: message.actionId, action: message.action, payload: message.payload || {} });
+      }
+      if (message.type === 'game.state.commit') {
+        emit({ type: 'game.state.committed', roomId: message.roomId, revision: message.revision });
+      }
     }
     close() {
       this.readyState = FakeWebSocket.CLOSED;
@@ -118,6 +131,11 @@ await page.fill('#mp-host-nick', 'Tester');
 await page.evaluate(() => window.Skat.multiplayer.handleGameAction('mp-quick-play', window.Skat.game.state));
 await page.waitForFunction(() => window.Skat.multiplayer.debug().room === 'TEST-ROOM');
 await page.waitForFunction(() => window.Skat.game.state.multiplayer === true, null, { timeout: 3000 });
+await page.waitForFunction(() => window.__wsFrames.some((frame) => frame.type === 'game.state.commit'));
+await page.waitForFunction(() => window.__wsFrames.filter((frame) => frame.type === 'game.state.publish').length >= 2);
+
+await page.evaluate(() => window.Skat.multiplayer.handleGameAction('auction-pass', window.Skat.game.state));
+await page.waitForFunction(() => window.__wsFrames.some((frame) => frame.type === 'game.action'));
 
 const result = await page.evaluate(() => ({
   room: window.Skat.multiplayer.debug().room,
@@ -130,7 +148,7 @@ const result = await page.evaluate(() => ({
 if (result.room !== 'TEST-ROOM' || result.role !== 'host' || result.players !== 3 || !result.multiplayer || !String(result.pill).includes('SERVER')) {
   throw new Error(`Quick Play flow failed: ${JSON.stringify(result)}`);
 }
-for (const required of ['session.create', 'queue.join', 'room.send']) {
+for (const required of ['session.create', 'queue.join', 'room.send', 'game.start', 'game.state.commit', 'game.state.publish', 'game.action']) {
   if (!result.frames.includes(required)) throw new Error(`Missing outbound ${required}: ${JSON.stringify(result.frames)}`);
 }
 if (pageErrors.length) throw new Error(`Page errors: ${pageErrors.join(' | ')}`);
