@@ -21,6 +21,11 @@ for (const [needle, label] of [
   ["type: 'game.action'", 'server action routing'],
   ["type: 'game.state.commit'", 'canonical state commit'],
   ["type: 'game.state.publish'", 'seat-private state publication'],
+  ["message.type === 'game.player.connection'", 'connection notifications'],
+  ["message.type === 'game.player.left'", 'leave notifications'],
+  ["'mp-toggle-bot'", 'hybrid bot toggle'],
+  ['botCount', 'hybrid bot game start'],
+  ['isBotSeat: (seat) => mp.botSeats.includes(seat)', 'bot seat control hook'],
   ['stateForSeat', 'seat-private state projection'],
   ['cloneGameState', 'serializable canonical state'],
 ]) if (!client.includes(needle)) throw new Error(`Missing ${label}`);
@@ -61,6 +66,11 @@ await page.addInitScript(() => {
     ownerSessionId: SESSION_ID, minPlayers: 3, maxPlayers: 3,
     players: [player(SESSION_ID, 'Tester'), player(OTHER_1, 'Alice'), player(OTHER_2, 'Bob')], createdAt: now, updatedAt: now,
   });
+  const hybridRoom = (status = 'waiting') => ({
+    id: 'BOT-ROOM', game: 'skat', name: 'Hybrid Skat', visibility: 'private', source: 'manual', status,
+    ownerSessionId: SESSION_ID, minPlayers: 3, maxPlayers: 3,
+    players: [player(SESSION_ID, 'Tester'), player(OTHER_1, 'Alice')], createdAt: now, updatedAt: now,
+  });
 
   class FakeWebSocket {
     static CONNECTING = 0;
@@ -71,6 +81,8 @@ await page.addInitScript(() => {
       this.url = url;
       this.readyState = FakeWebSocket.CONNECTING;
       window.__wsFrames = window.__wsFrames || [];
+      window.__fakeWs = this;
+      window.__emitServer = (payload) => setTimeout(() => this.onmessage?.({ data: JSON.stringify(payload) }), 0);
       setTimeout(() => {
         this.readyState = FakeWebSocket.OPEN;
         this.onopen?.({});
@@ -90,7 +102,17 @@ await page.addInitScript(() => {
       if (message.type === 'queue.leave') emit({ type: 'queue.left', game: 'skat', removed: true });
       if (message.type === 'room.leave') emit({ type: 'room.left', roomId: message.roomId });
       if (message.type === 'game.start') {
-        emit({ type: 'game.started', game: 'skat', room: fullRoom('in_game'), seat: 0, hostSessionId: SESSION_ID, revision: 0 });
+        const hybrid = message.roomId === 'BOT-ROOM' && message.botCount === 1;
+        emit({
+          type: 'game.started',
+          game: 'skat',
+          room: hybrid ? hybridRoom('in_game') : fullRoom('in_game'),
+          seat: 0,
+          hostSessionId: SESSION_ID,
+          botSeats: hybrid ? [2] : [],
+          seatCount: 3,
+          revision: 0,
+        });
       }
       if (message.type === 'game.action') {
         emit({ type: 'game.action', roomId: message.roomId, game: 'skat', fromSessionId: SESSION_ID, seat: 0, actionSeq: 1, actionId: message.actionId, action: message.action, payload: message.payload || {} });
@@ -105,6 +127,8 @@ await page.addInitScript(() => {
     }
   }
   window.WebSocket = FakeWebSocket;
+  window.__smokeIds = { SESSION_ID, OTHER_1, OTHER_2 };
+  window.__hybridRoom = hybridRoom;
 });
 
 await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load' });
@@ -127,6 +151,7 @@ if (!setup.browser || setup.publicRooms !== 1 || !setup.passwordHidden || !/MULT
   throw new Error(`Lobby setup failed: ${JSON.stringify(setup)}`);
 }
 
+// Existing 3-human Quick Play path.
 await page.fill('#mp-host-nick', 'Tester');
 await page.evaluate(() => window.Skat.multiplayer.handleGameAction('mp-quick-play', window.Skat.game.state));
 await page.waitForFunction(() => window.Skat.multiplayer.debug().room === 'TEST-ROOM');
@@ -137,7 +162,7 @@ await page.waitForFunction(() => window.__wsFrames.filter((frame) => frame.type 
 await page.evaluate(() => window.Skat.multiplayer.handleGameAction('auction-pass', window.Skat.game.state));
 await page.waitForFunction(() => window.__wsFrames.some((frame) => frame.type === 'game.action'));
 
-const result = await page.evaluate(() => ({
+const quickPlayResult = await page.evaluate(() => ({
   room: window.Skat.multiplayer.debug().room,
   role: window.Skat.multiplayer.debug().role,
   players: window.Skat.multiplayer.debug().roomObj?.players?.length,
@@ -145,16 +170,79 @@ const result = await page.evaluate(() => ({
   pill: document.getElementById('network-pill-text')?.textContent,
   frames: window.__wsFrames.map((frame) => frame.type),
 }));
-if (result.room !== 'TEST-ROOM' || result.role !== 'host' || result.players !== 3 || !result.multiplayer || !String(result.pill).includes('SERVER')) {
-  throw new Error(`Quick Play flow failed: ${JSON.stringify(result)}`);
+if (quickPlayResult.room !== 'TEST-ROOM' || quickPlayResult.role !== 'host' || quickPlayResult.players !== 3 || !quickPlayResult.multiplayer || !String(quickPlayResult.pill).includes('SERVER')) {
+  throw new Error(`Quick Play flow failed: ${JSON.stringify(quickPlayResult)}`);
 }
 for (const required of ['session.create', 'queue.join', 'room.send', 'game.start', 'game.state.commit', 'game.state.publish', 'game.action']) {
-  if (!result.frames.includes(required)) throw new Error(`Missing outbound ${required}: ${JSON.stringify(result.frames)}`);
+  if (!quickPlayResult.frames.includes(required)) throw new Error(`Missing outbound ${required}: ${JSON.stringify(quickPlayResult.frames)}`);
 }
+
+// Reset only the client-side room/game state, then exercise 2 humans + bot.
+await page.evaluate(() => {
+  const mp = window.Skat.multiplayer.debug();
+  const room = window.__hybridRoom('waiting');
+  mp.roomObj = room;
+  mp.room = room.id;
+  mp.hostSessionId = room.ownerSessionId;
+  mp.role = 'host';
+  mp.seat = 0;
+  mp.names = ['Tester', 'Alice', ''];
+  mp.inGame = false;
+  mp.stateSeq = 0;
+  mp.quickPlay = false;
+  mp.botSeats = [];
+  mp.fillBot = false;
+  window.Skat.game.state.multiplayer = false;
+  window.Skat.multiplayer.debugRenderLobby();
+});
+await page.waitForFunction(() => {
+  const button = document.getElementById('mp-toggle-bot');
+  return button && button.style.display !== 'none' && /bot/i.test(button.textContent || '');
+});
+await page.evaluate(() => window.Skat.multiplayer.handleGameAction('mp-toggle-bot', window.Skat.game.state));
+await page.waitForFunction(() => window.Skat.multiplayer.debug().fillBot === true);
+await page.waitForFunction(() => !document.getElementById('mp-start-button')?.disabled);
+await page.evaluate(() => window.Skat.multiplayer.handleGameAction('mp-start-game', window.Skat.game.state));
+await page.waitForFunction(() => window.Skat.multiplayer.debug().room === 'BOT-ROOM' && window.Skat.multiplayer.debug().inGame === true, null, { timeout: 3000 });
+await page.waitForFunction(() => window.Skat.multiplayer.isBotSeat(2) === true);
+await page.waitForFunction(() => window.__wsFrames.some((frame) => frame.type === 'game.start' && frame.roomId === 'BOT-ROOM' && frame.botCount === 1));
+
+const hybridResult = await page.evaluate(() => ({
+  botSeats: [...window.Skat.multiplayer.debug().botSeats],
+  isBotSeat2: window.Skat.multiplayer.isBotSeat(2),
+  names: [...(window.Skat.game.state.playerNames || [])],
+  start: window.__wsFrames.findLast((frame) => frame.type === 'game.start' && frame.roomId === 'BOT-ROOM'),
+}));
+if (!hybridResult.isBotSeat2 || hybridResult.botSeats.length !== 1 || hybridResult.botSeats[0] !== 2 || hybridResult.start?.botCount !== 1 || hybridResult.names[2] !== 'Bot') {
+  throw new Error(`Hybrid bot flow failed: ${JSON.stringify(hybridResult)}`);
+}
+
+// Presence events must be visible during an active game without ending it on a transient disconnect.
+await page.evaluate(() => {
+  const { OTHER_1 } = window.__smokeIds;
+  window.__emitServer({ type: 'game.player.connection', roomId: 'BOT-ROOM', sessionId: OTHER_1, seat: 1, nickname: 'Alice', connected: false });
+});
+await page.waitForFunction(() => /Alice/i.test(document.getElementById('mp-event-toast')?.textContent || '') && /połączenie|connection/i.test(document.getElementById('mp-event-toast')?.textContent || ''));
+const lostToast = await page.locator('#mp-event-toast').textContent();
+
+await page.evaluate(() => {
+  const { OTHER_1 } = window.__smokeIds;
+  window.__emitServer({ type: 'game.player.connection', roomId: 'BOT-ROOM', sessionId: OTHER_1, seat: 1, nickname: 'Alice', connected: true });
+});
+await page.waitForFunction(() => /Alice/i.test(document.getElementById('mp-event-toast')?.textContent || '') && /wznowione|reconnected/i.test(document.getElementById('mp-event-toast')?.textContent || ''));
+const restoredToast = await page.locator('#mp-event-toast').textContent();
+
+await page.evaluate(() => {
+  const { OTHER_1 } = window.__smokeIds;
+  window.__emitServer({ type: 'game.player.left', roomId: 'BOT-ROOM', sessionId: OTHER_1, seat: 1, nickname: 'Alice' });
+});
+await page.waitForFunction(() => /Alice/i.test(document.getElementById('mp-event-toast')?.textContent || '') && /opuścił|left/i.test(document.getElementById('mp-event-toast')?.textContent || ''));
+const leftToast = await page.locator('#mp-event-toast').textContent();
+
 if (pageErrors.length) throw new Error(`Page errors: ${pageErrors.join(' | ')}`);
 
 await context.close();
 await browser.close();
 await new Promise((resolve) => server.close(resolve));
 console.log('Shared server multiplayer smoke: PASS');
-console.log(result);
+console.log({ quickPlayResult, hybridResult, lostToast, restoredToast, leftToast });
