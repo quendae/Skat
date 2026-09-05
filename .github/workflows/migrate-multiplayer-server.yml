@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/migrate-multiplayer-server.yml'
       - 'scripts/migrate-multiplayer-server.mjs'
+      - 'scripts/add-hybrid-bot-presence.mjs'
   workflow_dispatch:
 
 permissions:
@@ -19,12 +20,17 @@ jobs:
         with:
           node-version: '22'
       - name: Apply multiplayer migration/update
-        run: node scripts/migrate-multiplayer-server.mjs
+        run: |
+          node scripts/migrate-multiplayer-server.mjs
+          node scripts/add-hybrid-bot-presence.mjs
       - name: Verify migration markers and syntax
         run: |
           grep -q '<script src="./multiplayer-server.js"></script>' index.html
           ! grep -q 'const RTC_CONFIG' index.html
           grep -q 'wss://api.qqnd.fyi/api/v1/ws' multiplayer-server.js
+          grep -q "isBotSeat: (seat) => mp.botSeats.includes(seat)" multiplayer-server.js
+          grep -q "game.player.connection" multiplayer-server.js
+          grep -q "botCount" multiplayer-server.js
           node --check multiplayer-server.js
       - name: Commit generated migration changes
         run: |
