@@ -26,6 +26,7 @@ jobs:
           grep -q 'graceBySeat' multiplayer-server.js
           grep -q 'game.player.bot_takeover' multiplayer-server.js
           grep -q 'graceDeadline' multiplayer-server.js
+          grep -q 'executePlayerAction, hideMainMenu, resumeAutomation' index.html
       - name: Commit generated client update
         run: |
           if git diff --quiet; then
@@ -34,6 +35,6 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add multiplayer-server.js
-          git commit -m 'feat: add 60s reconnect grace and bot takeover [skip ci]'
+          git add index.html multiplayer-server.js
+          git commit -m 'feat: finish reconnect bot takeover wiring'
           git push
