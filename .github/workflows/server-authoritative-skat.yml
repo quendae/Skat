@@ -1,0 +1,39 @@
+name: Server-authoritative Skat client
+
+on:
+  push:
+    paths:
+      - '.github/workflows/server-authoritative-skat.yml'
+      - 'scripts/enable-server-authoritative-skat.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply authoritative client migration
+        run: node scripts/enable-server-authoritative-skat.mjs
+      - name: Verify client
+        run: |
+          node --check multiplayer-server.js
+          grep -q 'authoritative: false' multiplayer-server.js
+          grep -q 'if (mp.authoritative) return' multiplayer-server.js
+          grep -q "settings = {" multiplayer-server.js
+      - name: Commit generated client
+        run: |
+          if git diff --quiet; then
+            echo 'No authoritative client changes needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add multiplayer-server.js
+          git commit -m 'feat: use server-authoritative Skat gameplay'
+          git push
