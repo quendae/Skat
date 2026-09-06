@@ -6,6 +6,7 @@
 
   const Skat = (window.Skat = window.Skat || {});
   const GAME_ID = 'skat';
+  const CLIENT_BUILD = '20260906-b2p3';
   const WS_URL = 'wss://api.qqnd.fyi/api/v1/ws';
   const SESSION_STORAGE_KEY = 'skat.qqnd.server-session.v1';
   const REQUEST_TIMEOUT_MS = 12000;
@@ -481,6 +482,46 @@
     return mp.roomObj?.players?.findIndex((player) => player.id === sessionId) ?? -1;
   }
 
+  function localSeat(serverSeat) {
+    if (!Number.isInteger(serverSeat)) return serverSeat;
+    const viewer = Number.isInteger(mp.seat) && mp.seat >= 0 ? mp.seat : 0;
+    return ((serverSeat - viewer) % 3 + 3) % 3;
+  }
+
+  function localBotSeats(serverSeats) {
+    if (!Array.isArray(serverSeats)) return [];
+    return [...new Set(serverSeats.filter(Number.isInteger).map(localSeat))].sort((a, b) => a - b);
+  }
+
+  function applyBotLabels(render = false) {
+    const state = Skat.game?.state;
+    if (!state || !Array.isArray(state.playerNames)) return;
+    const botWord = String(hybridCopy().botName || 'Bot');
+    state.playerNames = state.playerNames.map((name, seat) => {
+      const base = String(name || '').replace(/\s*·\s*BOT$/iu, '');
+      if (!mp.botSeats.includes(seat) || base.toLocaleLowerCase() === botWord.toLocaleLowerCase()) return base;
+      return base + ' · BOT';
+    });
+    if (render) Skat.ui?.render?.(state);
+  }
+
+  function applyPresenceSnapshot(entries) {
+    if (!Array.isArray(entries)) return;
+    const next = {};
+    for (const entry of entries) {
+      if (!entry || !Number.isInteger(entry.seat) || entry.sessionId === mp.session?.id) continue;
+      const seat = localSeat(entry.seat);
+      const previous = mp.graceBySeat?.[seat];
+      if (!entry.connected && entry.botActive) {
+        next[seat] = { phase: 'bot', deadline: 0, nickname: entry.nickname || previous?.nickname || 'Player', reason: previous?.reason || 'disconnect' };
+      } else if (!entry.connected && Number.isFinite(entry.graceDeadline)) {
+        next[seat] = { phase: 'waiting', deadline: entry.graceDeadline, nickname: entry.nickname || previous?.nickname || 'Player', reason: previous?.reason || 'disconnect' };
+      }
+    }
+    mp.graceBySeat = next;
+    refreshGraceTicker();
+  }
+
   function syncRoom(room) {
     if (!room || room.game !== GAME_ID) return;
     mp.roomObj = room;
@@ -488,6 +529,7 @@
     if (!mp.inGame || !mp.hostSessionId) mp.hostSessionId = room.ownerSessionId;
     mp.seat = mp.session ? seatForSession(mp.session.id) : null;
     mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
+    if (room.status === 'in_game') mp.authoritative = true;
     if (room.status === 'in_game' && room.players.length < 3 && mp.botSeats.length === 0) {
       mp.botSeats = Array.from({ length: 3 - room.players.length }, (_, index) => room.players.length + index);
       mp.fillBot = mp.botSeats.length > 0;
@@ -501,8 +543,7 @@
 
     renderLobby();
     if (mp.role === 'host') {
-      if (mp.inGame) broadcastState();
-      else broadcastLobby();
+      if (!mp.inGame) broadcastLobby();
       if (mp.quickPlay && room.players.length === 3 && room.players.every((player) => player.connected)) {
         window.setTimeout(() => startGame(), 250);
       }
@@ -595,9 +636,11 @@
       return;
     }
     if (message.type === 'game.started') {
-      mp.botSeats = Array.isArray(message.botSeats) ? message.botSeats.filter(Number.isInteger) : [];
+      if (Number.isInteger(message.seat)) mp.seat = message.seat;
+      mp.botSeats = localBotSeats(message.botSeats);
       mp.fillBot = mp.botSeats.length > 0;
-      mp.authoritative = !!message.authoritative;
+      mp.authoritative = true;
+      applyPresenceSnapshot(message.presence);
       mp.inGame = true;
       if (message.hostSessionId) mp.hostSessionId = message.hostSessionId;
       if (message.room?.game === GAME_ID) syncRoom(message.room);
@@ -614,11 +657,13 @@
       return;
     }
     if (message.type === 'game.state') {
-      if (message.authoritative != null) mp.authoritative = !!message.authoritative;
+      if (Number.isInteger(message.viewerSeat)) mp.seat = message.viewerSeat;
+      mp.authoritative = true;
       if (Array.isArray(message.botSeats)) {
-        mp.botSeats = message.botSeats.filter(Number.isInteger);
+        mp.botSeats = localBotSeats(message.botSeats);
         mp.fillBot = mp.botSeats.length > 0;
       }
+      applyPresenceSnapshot(message.presence);
       if (message.hostSessionId) {
         mp.hostSessionId = message.hostSessionId;
         mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
@@ -626,9 +671,19 @@
       if (message.roomId === mp.room) applyRemoteState(message.state, message.revision);
       return;
     }
+    if (message.type === 'game.presence' && message.roomId === mp.room) {
+      mp.authoritative = true;
+      if (Array.isArray(message.botSeats)) {
+        mp.botSeats = localBotSeats(message.botSeats);
+        mp.fillBot = mp.botSeats.length > 0;
+      }
+      applyPresenceSnapshot(message.presence);
+      applyBotLabels(true);
+      return;
+    }
     if (message.type === 'game.player.connection' && message.roomId === mp.room) {
       if (Array.isArray(message.botSeats)) {
-        mp.botSeats = message.botSeats.filter(Number.isInteger);
+        mp.botSeats = localBotSeats(message.botSeats);
         mp.fillBot = mp.botSeats.length > 0;
       }
       if (message.hostSessionId) {
@@ -636,9 +691,11 @@
         mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
       }
       if (Number.isInteger(message.seat)) {
-        if (message.connected) delete mp.graceBySeat[message.seat];
-        else if (Number.isFinite(message.graceDeadline)) mp.graceBySeat[message.seat] = { phase: 'waiting', deadline: message.graceDeadline, nickname: message.nickname || 'Player', reason: message.reason || 'disconnect' };
+        const seat = localSeat(message.seat);
+        if (message.connected) delete mp.graceBySeat[seat];
+        else if (Number.isFinite(message.graceDeadline)) mp.graceBySeat[seat] = { phase: 'waiting', deadline: message.graceDeadline, nickname: message.nickname || 'Player', reason: message.reason || 'disconnect' };
         refreshGraceTicker();
+        applyBotLabels(true);
       }
       if (message.sessionId !== mp.session?.id && message.connected) {
         const text = graceCopy(message.reclaimedFromBot ? 'reclaimed' : 'restored', message.nickname || 'Player', 0);
@@ -648,22 +705,18 @@
       return;
     }
     if (message.type === 'game.player.bot_takeover' && message.roomId === mp.room) {
+      mp.authoritative = true;
       if (Array.isArray(message.botSeats)) {
-        mp.botSeats = message.botSeats.filter(Number.isInteger);
+        mp.botSeats = localBotSeats(message.botSeats);
         mp.fillBot = mp.botSeats.length > 0;
       }
       if (message.hostSessionId) {
         mp.hostSessionId = message.hostSessionId;
         mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
       }
-      if (Number.isInteger(message.seat)) mp.graceBySeat[message.seat] = { phase: 'bot', deadline: 0, nickname: message.nickname || 'Player' };
+      if (Number.isInteger(message.seat)) mp.graceBySeat[localSeat(message.seat)] = { phase: 'bot', deadline: 0, nickname: message.nickname || 'Player' };
       refreshGraceTicker();
-      if (!mp.authoritative && mp.role === 'host' && mp.inGame) {
-        window.setTimeout(() => {
-          Skat.game?.resumeAutomation?.();
-          broadcastState();
-        }, 0);
-      }
+      applyBotLabels(true);
       return;
     }
     if (message.type === 'game.host.changed' && message.roomId === mp.room) {
@@ -1043,16 +1096,8 @@
   }
 
   function broadcastState() {
-    if (mp.authoritative) return;
-    if (mp.role !== 'host' || !mp.inGame || !mp.roomObj || mp.socket?.readyState !== WebSocket.OPEN) return;
-    const state = Skat.game?.state;
-    if (!state) return;
-    mp.stateSeq += 1;
-    socketSend({ type: 'game.state.commit', roomId: mp.room, revision: mp.stateSeq, state: cloneGameState(state) });
-    mp.roomObj.players.forEach((player, seat) => {
-      if (player.id === mp.session?.id || seat < 1 || seat > 2 || !player.connected) return;
-      socketSend({ type: 'game.state.publish', roomId: mp.room, revision: mp.stateSeq, toSessionId: player.id, state: stateForSeat(state, seat) });
-    });
+    // Skat B2 is always server-authoritative. Browser state must never be committed upstream.
+    return;
   }
 
   function applyRemoteState(snapshot, seq) {
@@ -1075,6 +1120,7 @@
       multiplayer: true,
     });
     state.settings = { ...localSettings, ...(snapshot.settings || {}), language: languageCode, soundEffects, animations };
+    applyBotLabels(false);
     Skat.game?.hideMainMenu?.();
     el('multiplayer-modal')?.classList.add('hidden');
     Skat.ui?.render?.(state);
@@ -1225,6 +1271,7 @@
     debugRenderLobby: renderLobby,
     debugStartGame: startGame,
     refreshRooms,
+    clientBuild: CLIENT_BUILD,
   };
 
   window.addEventListener('DOMContentLoaded', () => {

@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core';
 const html = fs.readFileSync('index.html', 'utf8');
 const client = fs.readFileSync('multiplayer-server.js', 'utf8');
 for (const [needle, label] of [
-  ['<script src="./multiplayer-server.js"></script>', 'shared-server client script'],
+  ['multiplayer-server.js?v=20260906-b2p3', 'versioned shared-server client script'],
   ['meta name="skat-api-url" content="https://api.qqnd.fyi"', 'QQND API metadata'],
 ]) if (!html.includes(needle)) throw new Error(`Missing ${label}`);
 for (const [needle, label] of [
@@ -19,8 +19,8 @@ for (const [needle, label] of [
   ["type: 'room.send'", 'authenticated lobby relay'],
   ["type: 'game.start'", 'server-approved game start'],
   ["type: 'game.action'", 'server action routing'],
-  ["type: 'game.state.commit'", 'canonical state commit'],
-  ["type: 'game.state.publish'", 'seat-private state publication'],
+  ["type: 'game.state.get'", 'authoritative state retrieval'],
+  ["message.type === 'game.presence'", 'recoverable presence snapshots'],
   ["message.type === 'game.player.connection'", 'connection notifications'],
   ["message.type === 'game.player.left'", 'leave notifications'],
   ["'mp-toggle-bot'", 'hybrid bot toggle'],
@@ -111,14 +111,16 @@ await page.addInitScript(() => {
           hostSessionId: SESSION_ID,
           botSeats: hybrid ? [2] : [],
           seatCount: 3,
-          revision: 0,
+          revision: 1,
+          authoritative: true,
+          presence: [],
         });
       }
       if (message.type === 'game.action') {
         emit({ type: 'game.action', roomId: message.roomId, game: 'skat', fromSessionId: SESSION_ID, seat: 0, actionSeq: 1, actionId: message.actionId, action: message.action, payload: message.payload || {} });
       }
-      if (message.type === 'game.state.commit') {
-        emit({ type: 'game.state.committed', roomId: message.roomId, revision: message.revision });
+      if (message.type === 'game.state.get') {
+        emit({ type: 'game.state.empty', roomId: message.roomId, authoritative: true, viewerSeat: 0, botSeats: message.roomId === 'BOT-ROOM' ? [2] : [], presence: [] });
       }
     }
     close() {
@@ -156,8 +158,10 @@ await page.fill('#mp-host-nick', 'Tester');
 await page.evaluate(() => window.Skat.multiplayer.handleGameAction('mp-quick-play', window.Skat.game.state));
 await page.waitForFunction(() => window.Skat.multiplayer.debug().room === 'TEST-ROOM');
 await page.waitForFunction(() => window.Skat.game.state.multiplayer === true, null, { timeout: 3000 });
-await page.waitForFunction(() => window.__wsFrames.some((frame) => frame.type === 'game.state.commit'));
-await page.waitForFunction(() => window.__wsFrames.filter((frame) => frame.type === 'game.state.publish').length >= 2);
+await page.waitForFunction(() => window.__wsFrames.some((frame) => frame.type === 'game.state.get'));
+await page.waitForTimeout(100);
+const legacyFrames = await page.evaluate(() => window.__wsFrames.filter((frame) => frame.type === 'game.state.commit' || frame.type === 'game.state.publish'));
+if (legacyFrames.length) throw new Error('Authoritative Skat client sent legacy state frames: ' + JSON.stringify(legacyFrames));
 
 await page.evaluate(() => window.Skat.multiplayer.handleGameAction('auction-pass', window.Skat.game.state));
 await page.waitForFunction(() => window.__wsFrames.some((frame) => frame.type === 'game.action'));
@@ -173,7 +177,7 @@ const quickPlayResult = await page.evaluate(() => ({
 if (quickPlayResult.room !== 'TEST-ROOM' || quickPlayResult.role !== 'host' || quickPlayResult.players !== 3 || !quickPlayResult.multiplayer || !String(quickPlayResult.pill).includes('SERVER')) {
   throw new Error(`Quick Play flow failed: ${JSON.stringify(quickPlayResult)}`);
 }
-for (const required of ['session.create', 'queue.join', 'room.send', 'game.start', 'game.state.commit', 'game.state.publish', 'game.action']) {
+for (const required of ['session.create', 'queue.join', 'room.send', 'game.start', 'game.state.get', 'game.action']) {
   if (!quickPlayResult.frames.includes(required)) throw new Error(`Missing outbound ${required}: ${JSON.stringify(quickPlayResult.frames)}`);
 }
 
@@ -243,6 +247,7 @@ await page.waitForFunction(() => {
   return node && node.style.visibility === 'visible' && /Alice/i.test(node.textContent || '') && /bot/i.test(node.textContent || '') && /przejął|took|übernommen|ocupó|pris/i.test(node.textContent || '');
 });
 const botNotice = await page.locator('#mp-presence-notice').textContent();
+await page.waitForFunction(() => /Alice\s*·\s*BOT/i.test((window.Skat.game.state.playerNames || [])[1] || ''));
 await page.evaluate(() => {
   const { OTHER_1, SESSION_ID } = window.__smokeIds;
   window.__emitServer({
@@ -255,6 +260,20 @@ await page.waitForFunction(() => {
   return node && /Alice/i.test(node.textContent || '') && /wrócił|returned|zurück|volvió|revenu/i.test(node.textContent || '');
 });
 const restoredNotice = await page.locator('#mp-presence-notice').textContent();
+await page.waitForFunction(() => !/BOT/i.test((window.Skat.game.state.playerNames || [])[1] || ''));
+
+// Presence snapshot alone must also reconstruct a persistent bot takeover state.
+await page.evaluate(() => {
+  const { OTHER_1, SESSION_ID } = window.__smokeIds;
+  window.__emitServer({
+    type: 'game.presence', roomId: 'BOT-ROOM', authoritative: true, hostSessionId: SESSION_ID, botSeats: [1, 2],
+    presence: [
+      { sessionId: SESSION_ID, seat: 0, nickname: 'Tester', connected: true, graceDeadline: null, botActive: false },
+      { sessionId: OTHER_1, seat: 1, nickname: 'Alice', connected: false, graceDeadline: null, botActive: true },
+    ],
+  });
+});
+await page.waitForFunction(() => /Alice/i.test(document.getElementById('mp-presence-notice')?.textContent || '') && /bot/i.test(document.getElementById('mp-presence-notice')?.textContent || ''));
 
 // Intentional leave uses the same centered countdown, but with leave-specific copy.
 await page.evaluate(() => {
