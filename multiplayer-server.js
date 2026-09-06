@@ -1,6 +1,5 @@
-/* Skat multiplayer Phase 1: shared QQND WebSocket server transport.
- * The browser host remains game-authoritative for now; the server owns sessions,
- * rooms, presence, matchmaking and authenticated message relay.
+/* Skat multiplayer: server-authoritative rules and shared QQND WebSocket transport.
+ * The server owns shuffle, deal, seats, action validation, gameplay state, bots and scoring.
  */
 (function () {
   'use strict';
@@ -33,6 +32,7 @@
     names: ['', '', ''],
     hostSessionId: '',
     inGame: false,
+    authoritative: false,
     stateSeq: 0,
     queued: false,
     quickPlay: false,
@@ -65,7 +65,7 @@
     pl: {
       eyebrow: 'MULTIPLAYER ONLINE',
       lead: 'Utwórz pokój, dołącz kodem albo użyj Quick Play. Połączenie prowadzi przez wspólny serwer QQND.',
-      notice: 'W tej fazie gospodarz nadal tasuje i pilnuje zasad. Serwer obsługuje sesje, pokoje, obecność i bezpieczne przekazywanie wiadomości; każdy gracz otrzymuje tylko swój widok stanu gry.',
+      notice: 'Serwer tasuje, rozdaje, pilnuje zasad, wykonuje boty i liczy wynik. Każdy gracz otrzymuje wyłącznie swój widok stanu gry.',
       createTitle: 'Utwórz pokój',
       joinTitle: 'Dołącz kodem',
       create: 'Utwórz pokój',
@@ -95,17 +95,17 @@
     },
     en: {
       eyebrow: 'ONLINE MULTIPLAYER', lead: 'Create a room, join by code or use Quick Play. Connections use the shared QQND server.',
-      notice: 'For this phase the browser host still shuffles and enforces the rules. The server handles sessions, rooms, presence and authenticated relay; each player receives only their own game view.',
+      notice: 'The server shuffles, deals, validates the rules, runs bots and scores the game. Each player receives only their own state view.',
       createTitle: 'Create room', joinTitle: 'Join by code', create: 'Create room', join: 'Join', roomCode: 'Room code', host: 'Host', waiting: 'Open seat', connected: 'Connected', offline: 'Offline', copyRoom: 'Copy code', leave: 'Leave room', start: 'Start game', publicRoom: 'Public', privateRoom: 'Private', browser: 'Public rooms', refresh: 'Refresh', quick: 'Quick Play', searching: 'Looking for two players…', noRooms: 'No open public rooms.', joinRoom: 'Join', serverOffline: 'Server connection unavailable.', reconnecting: 'Reconnecting to server…', roomReady: 'Room ready. Waiting for all players.', roomFull: 'All players connected. Host can start.', visibility: 'Visibility', visibilityHelp: 'Public rooms appear in the browser. Private rooms require the code.'
     },
     de: {
-      eyebrow: 'ONLINE-MEHRPSPIELER', lead: 'Erstelle einen Raum, tritt per Code bei oder nutze Quick Play. Die Verbindung läuft über den gemeinsamen QQND-Server.', notice: 'In dieser Phase mischt und prüft der Browser-Gastgeber weiterhin die Regeln. Der Server verwaltet Sitzungen, Räume, Anwesenheit und authentifizierte Nachrichten.', createTitle: 'Raum erstellen', joinTitle: 'Per Code beitreten', create: 'Raum erstellen', join: 'Beitreten', roomCode: 'Raumcode', host: 'Gastgeber', waiting: 'Freier Platz', connected: 'Verbunden', offline: 'Offline', copyRoom: 'Code kopieren', leave: 'Raum verlassen', start: 'Spiel starten', publicRoom: 'Öffentlich', privateRoom: 'Privat', browser: 'Öffentliche Räume', refresh: 'Aktualisieren', quick: 'Quick Play', searching: 'Suche zwei Spieler…', noRooms: 'Keine offenen öffentlichen Räume.', joinRoom: 'Beitreten', serverOffline: 'Keine Verbindung zum Server.', reconnecting: 'Verbindung zum Server wird wiederhergestellt…', roomReady: 'Raum bereit. Warte auf alle Spieler.', roomFull: 'Alle Spieler verbunden. Der Gastgeber kann starten.', visibility: 'Sichtbarkeit', visibilityHelp: 'Öffentliche Räume erscheinen in der Liste. Private Räume benötigen den Code.'
+      eyebrow: 'ONLINE-MEHRPSPIELER', lead: 'Erstelle einen Raum, tritt per Code bei oder nutze Quick Play. Die Verbindung läuft über den gemeinsamen QQND-Server.', notice: 'Der Server mischt, gibt, prüft die Regeln, steuert Bots und zählt die Punkte. Jeder Spieler erhält nur seine eigene Zustandsansicht.', createTitle: 'Raum erstellen', joinTitle: 'Per Code beitreten', create: 'Raum erstellen', join: 'Beitreten', roomCode: 'Raumcode', host: 'Gastgeber', waiting: 'Freier Platz', connected: 'Verbunden', offline: 'Offline', copyRoom: 'Code kopieren', leave: 'Raum verlassen', start: 'Spiel starten', publicRoom: 'Öffentlich', privateRoom: 'Privat', browser: 'Öffentliche Räume', refresh: 'Aktualisieren', quick: 'Quick Play', searching: 'Suche zwei Spieler…', noRooms: 'Keine offenen öffentlichen Räume.', joinRoom: 'Beitreten', serverOffline: 'Keine Verbindung zum Server.', reconnecting: 'Verbindung zum Server wird wiederhergestellt…', roomReady: 'Raum bereit. Warte auf alle Spieler.', roomFull: 'Alle Spieler verbunden. Der Gastgeber kann starten.', visibility: 'Sichtbarkeit', visibilityHelp: 'Öffentliche Räume erscheinen in der Liste. Private Räume benötigen den Code.'
     },
     es: {
-      eyebrow: 'MULTIJUGADOR ONLINE', lead: 'Crea una sala, únete por código o usa Quick Play. La conexión utiliza el servidor compartido QQND.', notice: 'En esta fase el anfitrión del navegador sigue barajando y aplicando las reglas. El servidor gestiona sesiones, salas, presencia y retransmisión autenticada.', createTitle: 'Crear sala', joinTitle: 'Unirse por código', create: 'Crear sala', join: 'Unirse', roomCode: 'Código de sala', host: 'Anfitrión', waiting: 'Plaza libre', connected: 'Conectado', offline: 'Sin conexión', copyRoom: 'Copiar código', leave: 'Salir', start: 'Iniciar partida', publicRoom: 'Pública', privateRoom: 'Privada', browser: 'Salas públicas', refresh: 'Actualizar', quick: 'Quick Play', searching: 'Buscando dos jugadores…', noRooms: 'No hay salas públicas abiertas.', joinRoom: 'Unirse', serverOffline: 'Sin conexión con el servidor.', reconnecting: 'Reconectando con el servidor…', roomReady: 'Sala preparada. Esperando a todos.', roomFull: 'Todos conectados. El anfitrión puede iniciar.', visibility: 'Visibilidad', visibilityHelp: 'Las salas públicas aparecen en la lista. Las privadas requieren el código.'
+      eyebrow: 'MULTIJUGADOR ONLINE', lead: 'Crea una sala, únete por código o usa Quick Play. La conexión utiliza el servidor compartido QQND.', notice: 'El servidor baraja, reparte, valida las reglas, controla los bots y calcula la puntuación. Cada jugador recibe solo su propia vista del estado.', createTitle: 'Crear sala', joinTitle: 'Unirse por código', create: 'Crear sala', join: 'Unirse', roomCode: 'Código de sala', host: 'Anfitrión', waiting: 'Plaza libre', connected: 'Conectado', offline: 'Sin conexión', copyRoom: 'Copiar código', leave: 'Salir', start: 'Iniciar partida', publicRoom: 'Pública', privateRoom: 'Privada', browser: 'Salas públicas', refresh: 'Actualizar', quick: 'Quick Play', searching: 'Buscando dos jugadores…', noRooms: 'No hay salas públicas abiertas.', joinRoom: 'Unirse', serverOffline: 'Sin conexión con el servidor.', reconnecting: 'Reconectando con el servidor…', roomReady: 'Sala preparada. Esperando a todos.', roomFull: 'Todos conectados. El anfitrión puede iniciar.', visibility: 'Visibilidad', visibilityHelp: 'Las salas públicas aparecen en la lista. Las privadas requieren el código.'
     },
     fr: {
-      eyebrow: 'MULTIJOUEUR EN LIGNE', lead: 'Créez une salle, rejoignez-la par code ou utilisez Quick Play. La connexion passe par le serveur QQND partagé.', notice: 'À cette étape, le navigateur hôte mélange encore et applique les règles. Le serveur gère les sessions, salles, présence et relais authentifié.', createTitle: 'Créer une salle', joinTitle: 'Rejoindre par code', create: 'Créer la salle', join: 'Rejoindre', roomCode: 'Code de salle', host: 'Hôte', waiting: 'Place libre', connected: 'Connecté', offline: 'Hors ligne', copyRoom: 'Copier le code', leave: 'Quitter', start: 'Lancer la partie', publicRoom: 'Publique', privateRoom: 'Privée', browser: 'Salles publiques', refresh: 'Actualiser', quick: 'Quick Play', searching: 'Recherche de deux joueurs…', noRooms: 'Aucune salle publique ouverte.', joinRoom: 'Rejoindre', serverOffline: 'Connexion au serveur indisponible.', reconnecting: 'Reconnexion au serveur…', roomReady: 'Salle prête. En attente de tous les joueurs.', roomFull: 'Tous les joueurs sont connectés. L’hôte peut lancer.', visibility: 'Visibilité', visibilityHelp: 'Les salles publiques apparaissent dans la liste. Les salles privées nécessitent le code.'
+      eyebrow: 'MULTIJOUEUR EN LIGNE', lead: 'Créez une salle, rejoignez-la par code ou utilisez Quick Play. La connexion passe par le serveur QQND partagé.', notice: 'Le serveur mélange, distribue, valide les règles, joue les bots et calcule le score. Chaque joueur ne reçoit que sa propre vue de l’état.', createTitle: 'Créer une salle', joinTitle: 'Rejoindre par code', create: 'Créer la salle', join: 'Rejoindre', roomCode: 'Code de salle', host: 'Hôte', waiting: 'Place libre', connected: 'Connecté', offline: 'Hors ligne', copyRoom: 'Copier le code', leave: 'Quitter', start: 'Lancer la partie', publicRoom: 'Publique', privateRoom: 'Privée', browser: 'Salles publiques', refresh: 'Actualiser', quick: 'Quick Play', searching: 'Recherche de deux joueurs…', noRooms: 'Aucune salle publique ouverte.', joinRoom: 'Rejoindre', serverOffline: 'Connexion au serveur indisponible.', reconnecting: 'Reconnexion au serveur…', roomReady: 'Salle prête. En attente de tous les joueurs.', roomFull: 'Tous les joueurs sont connectés. L’hôte peut lancer.', visibility: 'Visibilité', visibilityHelp: 'Les salles publiques apparaissent dans la liste. Les salles privées nécessitent le code.'
     }
   };
   const copy = () => COPY[language()] || COPY.pl;
@@ -524,18 +524,24 @@
     if (message.type === 'game.started') {
       mp.botSeats = Array.isArray(message.botSeats) ? message.botSeats.filter(Number.isInteger) : [];
       mp.fillBot = mp.botSeats.length > 0;
+      mp.authoritative = !!message.authoritative;
+      mp.inGame = true;
       if (message.hostSessionId) mp.hostSessionId = message.hostSessionId;
       if (message.room?.game === GAME_ID) syncRoom(message.room);
       mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
+      Skat.game?.hideMainMenu?.();
+      el('multiplayer-modal')?.classList.add('hidden');
+      updateNetworkPill(true);
       return;
     }
     if (message.type === 'game.action') {
-      if (mp.role === 'host' && mp.inGame && message.roomId === mp.room && Number.isInteger(message.seat)) {
+      if (!mp.authoritative && mp.role === 'host' && mp.inGame && message.roomId === mp.room && Number.isInteger(message.seat)) {
         Skat.game?.executePlayerAction?.(message.seat, message.action, message.payload || {});
       }
       return;
     }
     if (message.type === 'game.state') {
+      if (message.authoritative != null) mp.authoritative = !!message.authoritative;
       if (Array.isArray(message.botSeats)) {
         mp.botSeats = message.botSeats.filter(Number.isInteger);
         mp.fillBot = mp.botSeats.length > 0;
@@ -568,7 +574,7 @@
           : graceCopy('lost', message.nickname || 'Player', seconds || 60);
         showEventToast(text, message.connected ? 'success' : 'danger');
       }
-      if (message.connected && mp.role === 'host' && mp.inGame) window.setTimeout(broadcastState, 0);
+      if (message.connected && !mp.authoritative && mp.role === 'host' && mp.inGame) window.setTimeout(broadcastState, 0);
       return;
     }
     if (message.type === 'game.player.bot_takeover' && message.roomId === mp.room) {
@@ -583,7 +589,7 @@
       if (Number.isInteger(message.seat)) delete mp.graceBySeat[message.seat];
       refreshGraceTicker();
       showEventToast(graceCopy('bot', message.nickname || 'Player', 0), 'info');
-      if (mp.role === 'host' && mp.inGame) {
+      if (!mp.authoritative && mp.role === 'host' && mp.inGame) {
         window.setTimeout(() => {
           Skat.game?.resumeAutomation?.();
           broadcastState();
@@ -595,7 +601,7 @@
       mp.hostSessionId = message.hostSessionId || mp.hostSessionId;
       mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
       if (Array.isArray(message.botSeats)) mp.botSeats = message.botSeats.filter(Number.isInteger);
-      if (mp.role === 'host' && mp.socket?.readyState === WebSocket.OPEN) socketSend({ type: 'game.state.get', roomId: mp.room });
+      if (!mp.authoritative && mp.role === 'host' && mp.socket?.readyState === WebSocket.OPEN) socketSend({ type: 'game.state.get', roomId: mp.room });
       return;
     }
     if (message.type === 'game.player.left' && message.roomId === mp.room && message.sessionId !== mp.session?.id) {
@@ -904,6 +910,7 @@
     mp.names = ['', '', ''];
     mp.hostSessionId = '';
     mp.inGame = false;
+    mp.authoritative = false;
     mp.stateSeq = 0;
     mp.queued = false;
     mp.quickPlay = false;
@@ -963,6 +970,7 @@
   }
 
   function broadcastState() {
+    if (mp.authoritative) return;
     if (mp.role !== 'host' || !mp.inGame || !mp.roomObj || mp.socket?.readyState !== WebSocket.OPEN) return;
     const state = Skat.game?.state;
     if (!state) return;
@@ -980,10 +988,11 @@
     mp.inGame = true;
     const state = Skat.game?.state;
     if (!state) return;
-    const languageCode = state.settings?.language || 'pl';
-    const soundEffects = state.settings?.soundEffects;
-    const animations = state.settings?.animations;
-    const selected = state.phase === 'discard' ? new Set(state.selectedDiscard || []) : new Set();
+    const localSettings = { ...(state.settings || {}) };
+    const languageCode = localSettings.language || 'pl';
+    const soundEffects = localSettings.soundEffects;
+    const animations = localSettings.animations;
+    const selected = snapshot.phase === 'discard' ? new Set(snapshot.selectedDiscard || []) : new Set();
     Object.assign(state, snapshot, {
       selectedDiscard: selected,
       voids: (snapshot.voids || [[], [], []]).map((items) => new Set(items || [])),
@@ -992,7 +1001,7 @@
       cardFlight: null,
       multiplayer: true,
     });
-    state.settings = { ...(snapshot.settings || {}), language: languageCode, soundEffects, animations };
+    state.settings = { ...localSettings, ...(snapshot.settings || {}), language: languageCode, soundEffects, animations };
     Skat.game?.hideMainMenu?.();
     el('multiplayer-modal')?.classList.add('hidden');
     Skat.ui?.render?.(state);
@@ -1005,9 +1014,17 @@
     const ready = mp.role === 'host' && humans.every((player) => player.connected) && humans.length + botCount === 3;
     if (!ready || mp.inGame) return;
     try {
-      const started = await request({ type: 'game.start', roomId: mp.room, botCount }, 'game.started', (message) => message.room?.id === mp.room);
+      const local = Skat.game?.state?.settings || {};
+      const settings = {
+        advancedContracts: !!local.advancedContracts,
+        ramsch: !!local.ramsch,
+        kontraRe: !!local.kontraRe,
+        botDifficulty: ['easy','normal','hard','expert'].includes(local.botDifficulty) ? local.botDifficulty : 'normal',
+      };
+      const started = await request({ type: 'game.start', roomId: mp.room, botCount, settings }, 'game.started', (message) => message.room?.id === mp.room);
       mp.botSeats = Array.isArray(started.botSeats) ? started.botSeats.filter(Number.isInteger) : [];
       mp.fillBot = mp.botSeats.length > 0;
+      mp.authoritative = !!started.authoritative;
       mp.names = [0, 1, 2].map((seat) => humans[seat]?.nickname || (mp.botSeats.includes(seat) ? hybridCopy().botName : ''));
       mp.inGame = true;
       mp.quickPlay = false;
@@ -1018,9 +1035,13 @@
       state.tutorialMode = false;
       Skat.game.hideMainMenu();
       el('multiplayer-modal')?.classList.add('hidden');
-      Skat.game.resetMatch();
       updateNetworkPill(true);
-      window.setTimeout(broadcastState, 0);
+      if (mp.authoritative) {
+        socketSend({ type: 'game.state.get', roomId: mp.room });
+      } else {
+        Skat.game.resetMatch();
+        window.setTimeout(broadcastState, 0);
+      }
     } catch (error) {
       setStatus('mp-lobby-status', friendlyError(error), true);
     }
@@ -1102,7 +1123,7 @@
     prepareModalUI();
     const connected = mp.socket?.readyState === WebSocket.OPEN && (!mp.roomObj || mp.roomObj.players.some((player) => player.id === mp.session?.id && player.connected));
     updateNetworkPill(connected);
-    if (mp.role === 'host' && mp.inGame && state.multiplayer) broadcastState();
+    if (!mp.authoritative && mp.role === 'host' && mp.inGame && state.multiplayer) broadcastState();
   }
 
   document.addEventListener('click', (event) => {
