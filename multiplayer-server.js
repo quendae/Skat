@@ -143,10 +143,17 @@
     }, 4500);
   }
 
-  function graceCopy(kind, name, seconds) {
+  function graceCopy(kind, name, seconds, reason = 'disconnect') {
     const lang = language();
     const n = name || (lang === 'pl' ? 'graczem' : 'player');
     if (kind === 'lost') {
+      if (reason === 'leave') {
+        if (lang === 'pl') return 'Gracz ' + n + ' opuścił grę. Czekamy ' + seconds + ' s. na jego powrót, potem miejsce przejmie bot.';
+        if (lang === 'de') return n + ' hat das Spiel verlassen. Wir warten ' + seconds + ' s.; danach übernimmt ein Bot.';
+        if (lang === 'es') return n + ' salió de la partida. Esperamos ' + seconds + ' s.; después ocupará su lugar un bot.';
+        if (lang === 'fr') return n + ' a quitté la partie. Nous attendons ' + seconds + ' s.; ensuite un bot prendra sa place.';
+        return n + ' left the game. Waiting ' + seconds + ' s. for a return; then a bot takes the seat.';
+      }
       if (lang === 'pl') return 'Utracono połączenie z graczem ' + n + '. Bot przejmie jego miejsce za ' + seconds + ' s.';
       if (lang === 'de') return 'Verbindung zu ' + n + ' verloren. Ein Bot übernimmt in ' + seconds + ' s.';
       if (lang === 'es') return 'Se perdió la conexión con ' + n + '. Un bot ocupará su lugar en ' + seconds + ' s.';
@@ -209,7 +216,7 @@
     let text = '';
     if (entry.phase === 'waiting') {
       const seconds = Math.max(0, Math.ceil((entry.deadline - Date.now()) / 1000));
-      text = graceCopy('lost', entry.nickname || 'Player', seconds);
+      text = graceCopy('lost', entry.nickname || 'Player', seconds, entry.reason || 'disconnect');
       node.style.borderColor = 'rgba(255,143,143,.68)';
     } else {
       text = graceCopy('bot', entry.nickname || 'Player', 0);
@@ -630,7 +637,7 @@
       }
       if (Number.isInteger(message.seat)) {
         if (message.connected) delete mp.graceBySeat[message.seat];
-        else if (Number.isFinite(message.graceDeadline)) mp.graceBySeat[message.seat] = { phase: 'waiting', deadline: message.graceDeadline, nickname: message.nickname || 'Player' };
+        else if (Number.isFinite(message.graceDeadline)) mp.graceBySeat[message.seat] = { phase: 'waiting', deadline: message.graceDeadline, nickname: message.nickname || 'Player', reason: message.reason || 'disconnect' };
         refreshGraceTicker();
       }
       if (message.sessionId !== mp.session?.id && message.connected) {

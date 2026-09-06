@@ -217,27 +217,58 @@ if (!hybridResult.isBotSeat2 || hybridResult.botSeats.length !== 1 || hybridResu
   throw new Error(`Hybrid bot flow failed: ${JSON.stringify(hybridResult)}`);
 }
 
-// Presence events must be visible during an active game without ending it on a transient disconnect.
+// Presence events use one centered persistent notice: countdown -> bot takeover -> reconnect.
 await page.evaluate(() => {
   const { OTHER_1 } = window.__smokeIds;
-  window.__emitServer({ type: 'game.player.connection', roomId: 'BOT-ROOM', sessionId: OTHER_1, seat: 1, nickname: 'Alice', connected: false });
+  window.__emitServer({
+    type: 'game.player.connection', roomId: 'BOT-ROOM', sessionId: OTHER_1, seat: 1,
+    nickname: 'Alice', connected: false, reason: 'disconnect', graceMs: 60000, graceDeadline: Date.now() + 60000,
+  });
 });
-await page.waitForFunction(() => /Alice/i.test(document.getElementById('mp-event-toast')?.textContent || '') && /połączenie|connection/i.test(document.getElementById('mp-event-toast')?.textContent || ''));
-const lostToast = await page.locator('#mp-event-toast').textContent();
+await page.waitForFunction(() => {
+  const node = document.getElementById('mp-presence-notice');
+  return node && node.style.visibility === 'visible' && /Alice/i.test(node.textContent || '') && /połączenie|connection/i.test(node.textContent || '') && /bot/i.test(node.textContent || '');
+});
+const lostNotice = await page.locator('#mp-presence-notice').textContent();
 
 await page.evaluate(() => {
-  const { OTHER_1 } = window.__smokeIds;
-  window.__emitServer({ type: 'game.player.connection', roomId: 'BOT-ROOM', sessionId: OTHER_1, seat: 1, nickname: 'Alice', connected: true });
+  const { OTHER_1, SESSION_ID } = window.__smokeIds;
+  window.__emitServer({
+    type: 'game.player.bot_takeover', roomId: 'BOT-ROOM', sessionId: OTHER_1, seat: 1,
+    nickname: 'Alice', botSeats: [1, 2], hostSessionId: SESSION_ID, authoritative: true,
+  });
 });
-await page.waitForFunction(() => /Alice/i.test(document.getElementById('mp-event-toast')?.textContent || '') && /wznowione|reconnected/i.test(document.getElementById('mp-event-toast')?.textContent || ''));
-const restoredToast = await page.locator('#mp-event-toast').textContent();
+await page.waitForFunction(() => {
+  const node = document.getElementById('mp-presence-notice');
+  return node && node.style.visibility === 'visible' && /Alice/i.test(node.textContent || '') && /bot/i.test(node.textContent || '') && /przejął|took|übernommen|ocupó|pris/i.test(node.textContent || '');
+});
+const botNotice = await page.locator('#mp-presence-notice').textContent();
+await page.evaluate(() => {
+  const { OTHER_1, SESSION_ID } = window.__smokeIds;
+  window.__emitServer({
+    type: 'game.player.connection', roomId: 'BOT-ROOM', sessionId: OTHER_1, seat: 1,
+    nickname: 'Alice', connected: true, reclaimedFromBot: true, botSeats: [2], hostSessionId: SESSION_ID, authoritative: true,
+  });
+});
+await page.waitForFunction(() => {
+  const node = document.getElementById('mp-presence-notice');
+  return node && /Alice/i.test(node.textContent || '') && /wrócił|returned|zurück|volvió|revenu/i.test(node.textContent || '');
+});
+const restoredNotice = await page.locator('#mp-presence-notice').textContent();
 
+// Intentional leave uses the same centered countdown, but with leave-specific copy.
 await page.evaluate(() => {
   const { OTHER_1 } = window.__smokeIds;
-  window.__emitServer({ type: 'game.player.left', roomId: 'BOT-ROOM', sessionId: OTHER_1, seat: 1, nickname: 'Alice' });
+  window.__emitServer({
+    type: 'game.player.connection', roomId: 'BOT-ROOM', sessionId: OTHER_1, seat: 1,
+    nickname: 'Alice', connected: false, reason: 'leave', graceMs: 60000, graceDeadline: Date.now() + 60000,
+  });
 });
-await page.waitForFunction(() => /Alice/i.test(document.getElementById('mp-event-toast')?.textContent || '') && /opuścił|left/i.test(document.getElementById('mp-event-toast')?.textContent || ''));
-const leftToast = await page.locator('#mp-event-toast').textContent();
+await page.waitForFunction(() => {
+  const node = document.getElementById('mp-presence-notice');
+  return node && node.style.visibility === 'visible' && /Alice/i.test(node.textContent || '') && /opuścił|left|verlassen|salió|quitté/i.test(node.textContent || '');
+});
+const leftNotice = await page.locator('#mp-presence-notice').textContent();
 
 if (pageErrors.length) throw new Error(`Page errors: ${pageErrors.join(' | ')}`);
 
@@ -245,4 +276,4 @@ await context.close();
 await browser.close();
 await new Promise((resolve) => server.close(resolve));
 console.log('Shared server multiplayer smoke: PASS');
-console.log({ quickPlayResult, hybridResult, lostToast, restoredToast, leftToast });
+console.log({ quickPlayResult, hybridResult, lostNotice, botNotice, restoredNotice, leftNotice });
