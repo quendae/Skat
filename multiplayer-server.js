@@ -40,6 +40,8 @@
     fillBot: false,
     rooms: [],
     lastError: '',
+    graceBySeat: {},
+    graceTicker: null,
   };
 
   const el = (id) => document.getElementById(id);
@@ -138,6 +140,50 @@
       node.style.opacity = '0';
       node.style.transform = 'translateX(-50%) translateY(-8px)';
     }, 4500);
+  }
+
+  function graceCopy(kind, name, seconds) {
+    const lang = language();
+    const n = name || (lang === 'pl' ? 'graczem' : 'player');
+    if (kind === 'lost') {
+      if (lang === 'pl') return 'Utracono połączenie z graczem ' + n + '. Bot przejmie jego miejsce za ' + seconds + ' s.';
+      if (lang === 'de') return 'Verbindung zu ' + n + ' verloren. Ein Bot übernimmt in ' + seconds + ' s.';
+      if (lang === 'es') return 'Se perdió la conexión con ' + n + '. Un bot ocupará su lugar en ' + seconds + ' s.';
+      if (lang === 'fr') return 'Connexion avec ' + n + ' perdue. Un bot prendra sa place dans ' + seconds + ' s.';
+      return 'Connection to ' + n + ' was lost. A bot will take the seat in ' + seconds + ' s.';
+    }
+    if (kind === 'bot') {
+      if (lang === 'pl') return 'Minęło 60 sekund. Bot przejął miejsce gracza ' + n + ' i gra jego obecną ręką.';
+      if (lang === 'de') return '60 Sekunden sind abgelaufen. Ein Bot übernimmt den Platz von ' + n + ' mit der aktuellen Hand.';
+      if (lang === 'es') return 'Han pasado 60 segundos. Un bot ocupa el lugar de ' + n + ' con su mano actual.';
+      if (lang === 'fr') return '60 secondes se sont écoulées. Un bot prend la place de ' + n + ' avec sa main actuelle.';
+      return '60 seconds elapsed. A bot took ' + n + "'s seat with the current hand.";
+    }
+    if (kind === 'reclaimed') {
+      if (lang === 'pl') return 'Gracz ' + n + ' wrócił i przejął miejsce bota z zastaną ręką.';
+      if (lang === 'de') return n + ' ist zurück und übernimmt den Bot-Platz mit der aktuellen Hand.';
+      if (lang === 'es') return n + ' volvió y recuperó el lugar del bot con la mano actual.';
+      if (lang === 'fr') return n + ' est revenu et reprend la place du bot avec la main actuelle.';
+      return n + ' returned and reclaimed the bot seat with the current hand.';
+    }
+    return hybridCopy().connectionRestored(n);
+  }
+
+  function graceCountdownText() {
+    const entries = Object.values(mp.graceBySeat || {}).filter((entry) => entry?.deadline > Date.now());
+    if (!entries.length) return '';
+    entries.sort((a, b) => a.deadline - b.deadline);
+    const entry = entries[0];
+    const seconds = Math.max(0, Math.ceil((entry.deadline - Date.now()) / 1000));
+    return language() === 'pl' ? (entry.nickname + ': bot za ' + seconds + ' s') : (entry.nickname + ': bot in ' + seconds + 's');
+  }
+
+  function refreshGraceTicker() {
+    if (mp.graceTicker) window.clearInterval(mp.graceTicker);
+    const tick = () => updateNetworkPill(mp.socket?.readyState === WebSocket.OPEN);
+    tick();
+    if (Object.keys(mp.graceBySeat || {}).length) mp.graceTicker = window.setInterval(tick, 250);
+    else mp.graceTicker = null;
   }
 
   function normalizeNick(value) {
@@ -255,6 +301,9 @@
         window.clearTimeout(timer);
         if (mp.socket === socket) mp.socket = null;
         mp.socketPromise = null;
+        // A new WebSocket must authenticate again with the stored resume token.
+        mp.session = null;
+        mp.resumeToken = '';
         for (const waiter of mp.waiters.splice(0)) {
           window.clearTimeout(waiter.timer);
           waiter.reject(new Error('connection_closed'));
@@ -357,12 +406,11 @@
 
   function syncRoom(room) {
     if (!room || room.game !== GAME_ID) return;
-    const previousHost = mp.hostSessionId;
     mp.roomObj = room;
     mp.room = room.id;
-    mp.hostSessionId = room.ownerSessionId;
+    if (!mp.inGame || !mp.hostSessionId) mp.hostSessionId = room.ownerSessionId;
     mp.seat = mp.session ? seatForSession(mp.session.id) : null;
-    mp.role = mp.session?.id === room.ownerSessionId ? 'host' : 'guest';
+    mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
     if (room.status === 'in_game' && room.players.length < 3 && mp.botSeats.length === 0) {
       mp.botSeats = Array.from({ length: 3 - room.players.length }, (_, index) => room.players.length + index);
       mp.fillBot = mp.botSeats.length > 0;
@@ -476,7 +524,9 @@
     if (message.type === 'game.started') {
       mp.botSeats = Array.isArray(message.botSeats) ? message.botSeats.filter(Number.isInteger) : [];
       mp.fillBot = mp.botSeats.length > 0;
+      if (message.hostSessionId) mp.hostSessionId = message.hostSessionId;
       if (message.room?.game === GAME_ID) syncRoom(message.room);
+      mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
       return;
     }
     if (message.type === 'game.action') {
@@ -490,12 +540,62 @@
         mp.botSeats = message.botSeats.filter(Number.isInteger);
         mp.fillBot = mp.botSeats.length > 0;
       }
+      if (message.hostSessionId) {
+        mp.hostSessionId = message.hostSessionId;
+        mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
+      }
       if (message.roomId === mp.room) applyRemoteState(message.state, message.revision);
       return;
     }
-    if (message.type === 'game.player.connection' && message.roomId === mp.room && message.sessionId !== mp.session?.id) {
-      const text = message.connected ? hybridCopy().connectionRestored(message.nickname || 'gracz') : hybridCopy().connectionLost(message.nickname || 'gracz');
-      showEventToast(text, message.connected ? 'success' : 'danger');
+    if (message.type === 'game.player.connection' && message.roomId === mp.room) {
+      if (Array.isArray(message.botSeats)) {
+        mp.botSeats = message.botSeats.filter(Number.isInteger);
+        mp.fillBot = mp.botSeats.length > 0;
+      }
+      if (message.hostSessionId) {
+        mp.hostSessionId = message.hostSessionId;
+        mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
+      }
+      if (Number.isInteger(message.seat)) {
+        if (message.connected) delete mp.graceBySeat[message.seat];
+        else if (Number.isFinite(message.graceDeadline)) mp.graceBySeat[message.seat] = { deadline: message.graceDeadline, nickname: message.nickname || 'Player' };
+        refreshGraceTicker();
+      }
+      if (message.sessionId !== mp.session?.id) {
+        const seconds = Math.max(0, Math.ceil(((message.graceDeadline || Date.now()) - Date.now()) / 1000));
+        const text = message.connected
+          ? graceCopy(message.reclaimedFromBot ? 'reclaimed' : 'restored', message.nickname || 'Player', seconds)
+          : graceCopy('lost', message.nickname || 'Player', seconds || 60);
+        showEventToast(text, message.connected ? 'success' : 'danger');
+      }
+      if (message.connected && mp.role === 'host' && mp.inGame) window.setTimeout(broadcastState, 0);
+      return;
+    }
+    if (message.type === 'game.player.bot_takeover' && message.roomId === mp.room) {
+      if (Array.isArray(message.botSeats)) {
+        mp.botSeats = message.botSeats.filter(Number.isInteger);
+        mp.fillBot = mp.botSeats.length > 0;
+      }
+      if (message.hostSessionId) {
+        mp.hostSessionId = message.hostSessionId;
+        mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
+      }
+      if (Number.isInteger(message.seat)) delete mp.graceBySeat[message.seat];
+      refreshGraceTicker();
+      showEventToast(graceCopy('bot', message.nickname || 'Player', 0), 'info');
+      if (mp.role === 'host' && mp.inGame) {
+        window.setTimeout(() => {
+          Skat.game?.resumeAutomation?.();
+          broadcastState();
+        }, 0);
+      }
+      return;
+    }
+    if (message.type === 'game.host.changed' && message.roomId === mp.room) {
+      mp.hostSessionId = message.hostSessionId || mp.hostSessionId;
+      mp.role = mp.session?.id === mp.hostSessionId ? 'host' : 'guest';
+      if (Array.isArray(message.botSeats)) mp.botSeats = message.botSeats.filter(Number.isInteger);
+      if (mp.role === 'host' && mp.socket?.readyState === WebSocket.OPEN) socketSend({ type: 'game.state.get', roomId: mp.room });
       return;
     }
     if (message.type === 'game.player.left' && message.roomId === mp.room && message.sessionId !== mp.session?.id) {
@@ -809,6 +909,9 @@
     mp.quickPlay = false;
     mp.botSeats = [];
     mp.fillBot = false;
+    mp.graceBySeat = {};
+    if (mp.graceTicker) window.clearInterval(mp.graceTicker);
+    mp.graceTicker = null;
     const state = Skat.game?.state;
     if (state) {
       state.multiplayer = false;
@@ -937,7 +1040,10 @@
     if (!pill) return;
     pill.classList.toggle('visible', !!mp.inGame);
     pill.classList.toggle('offline', !connected);
-    if (el('network-pill-text')) el('network-pill-text').textContent = mp.room ? `SERVER · ${mp.room}` : 'SERVER';
+    if (el('network-pill-text')) {
+      const countdown = graceCountdownText();
+      el('network-pill-text').textContent = mp.room ? `SERVER · ${mp.room}${countdown ? ` · ${countdown}` : ''}` : 'SERVER';
+    }
     const brand = document.querySelector('.brand-block .eyebrow');
     if (brand && mp.inGame) brand.textContent = `MULTIPLAYER · ${mp.room}`;
   }
