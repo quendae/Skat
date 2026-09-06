@@ -1,0 +1,39 @@
+name: Persistent disconnect notice v2
+
+on:
+  push:
+    paths:
+      - '.github/workflows/persistent-disconnect-notice-v2.yml'
+      - 'scripts/persistent-disconnect-notice-v2.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply migration
+        run: node scripts/persistent-disconnect-notice-v2.mjs
+      - name: Verify syntax and markers
+        run: |
+          node --check multiplayer-server.js
+          node --check tests/multiplayer_server_smoke.mjs
+          grep -q "reason: message.reason" multiplayer-server.js
+          grep -q "botNotice" tests/multiplayer_server_smoke.mjs
+      - name: Commit generated changes
+        run: |
+          if git diff --quiet; then
+            echo 'No v2 presence changes needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add multiplayer-server.js tests/multiplayer_server_smoke.mjs
+          git commit -m 'fix: persist disconnect state through bot takeover [skip ci]'
+          git push
