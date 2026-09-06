@@ -34,12 +34,13 @@ jobs:
           ! grep -q "type: 'game.state.publish'" multiplayer-server.js
       - name: Commit generated changes
         run: |
+          git checkout -- .github/workflows/multiplayer-bot-seat.yml
           if git diff --quiet; then
             echo 'No changes needed.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add index.html multiplayer-server.js tests/multiplayer_server_smoke.mjs .github/workflows/multiplayer-bot-seat.yml
+          git add index.html multiplayer-server.js tests/multiplayer_server_smoke.mjs
           git commit -m 'fix: harden authoritative presence and bot takeover UI [skip ci]'
           git push
