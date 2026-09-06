@@ -31,6 +31,9 @@ jobs:
           grep -q 'graceBySeat' multiplayer-server.js
           grep -q "message.type === 'game.player.bot_takeover'" multiplayer-server.js
           grep -q 'graceCountdownText' multiplayer-server.js
+          grep -q 'authoritative: false' multiplayer-server.js
+          grep -q 'if (mp.authoritative) return' multiplayer-server.js
+          grep -q "socketSend({ type: 'game.state.get', roomId: mp.room })" multiplayer-server.js
 
       - name: Install browser test driver
         run: npm install --no-save --no-package-lock playwright-core@1.55.0
