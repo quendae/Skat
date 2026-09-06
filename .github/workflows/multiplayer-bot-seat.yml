@@ -35,8 +35,10 @@ jobs:
           grep -q 'mp-presence-notice' multiplayer-server.js
           grep -q "phase: 'bot'" multiplayer-server.js
           grep -q "reason: message.reason" multiplayer-server.js
-          grep -q 'authoritative: false' multiplayer-server.js
-          grep -q 'if (mp.authoritative) return' multiplayer-server.js
+          grep -q "CLIENT_BUILD = '20260906-b2p3'" multiplayer-server.js
+          grep -q "message.type === 'game.presence'" multiplayer-server.js
+          ! grep -q "type: 'game.state.commit'" multiplayer-server.js
+          ! grep -q "type: 'game.state.publish'" multiplayer-server.js
           grep -q "socketSend({ type: 'game.state.get', roomId: mp.room })" multiplayer-server.js
 
       - name: Install browser test driver
