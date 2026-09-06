@@ -26,7 +26,11 @@ jobs:
           node-version: '22'
 
       - name: Syntax-check multiplayer client
-        run: node --check multiplayer-server.js
+        run: |
+          node --check multiplayer-server.js
+          grep -q 'graceBySeat' multiplayer-server.js
+          grep -q "message.type === 'game.player.bot_takeover'" multiplayer-server.js
+          grep -q 'graceCountdownText' multiplayer-server.js
 
       - name: Install browser test driver
         run: npm install --no-save --no-package-lock playwright-core@1.55.0
