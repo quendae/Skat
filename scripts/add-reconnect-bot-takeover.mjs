@@ -165,5 +165,16 @@ replaceOnce(
   'network pill countdown',
 );
 
+const indexPath = 'index.html';
+let index = fs.readFileSync(indexPath, 'utf8');
+const exportBefore = '    executePlayerAction, hideMainMenu,\n';
+const exportAfter = '    executePlayerAction, hideMainMenu, resumeAutomation,\n';
+if (!index.includes(exportAfter)) {
+  if (!index.includes(exportBefore)) throw new Error('Missing migration marker: resumeAutomation export');
+  index = index.replace(exportBefore, exportAfter);
+  fs.writeFileSync(indexPath, index);
+  changed = true;
+}
+
 if (changed) fs.writeFileSync(path, src);
 console.log(changed ? 'Reconnect/bot takeover migration applied.' : 'Reconnect/bot takeover migration already applied.');
