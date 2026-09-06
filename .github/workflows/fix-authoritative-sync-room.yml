@@ -1,0 +1,31 @@
+name: Fix authoritative sync room
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-authoritative-sync-room.yml'
+      - 'scripts/fix-authoritative-sync-room.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/fix-authoritative-sync-room.mjs
+      - run: |
+          node --check multiplayer-server.js
+          ! grep -q 'previousHost' multiplayer-server.js
+      - run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add multiplayer-server.js
+          git commit -m 'fix: remove obsolete browser-host abort branch'
+          git push
