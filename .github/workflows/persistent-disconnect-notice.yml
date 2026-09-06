@@ -1,0 +1,39 @@
+name: Persistent disconnect notice
+
+on:
+  push:
+    paths:
+      - '.github/workflows/persistent-disconnect-notice.yml'
+      - 'scripts/persistent-disconnect-notice.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply migration
+        run: node scripts/persistent-disconnect-notice.mjs
+      - name: Verify multiplayer client
+        run: |
+          node --check multiplayer-server.js
+          grep -q 'mp-presence-notice' multiplayer-server.js
+          grep -q "phase: 'bot'" multiplayer-server.js
+          grep -q "window.addEventListener('pagehide'" multiplayer-server.js
+      - name: Commit generated client update
+        run: |
+          if git diff --quiet; then
+            echo 'No persistent disconnect changes needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add multiplayer-server.js
+          git commit -m 'fix: keep disconnect and bot takeover notice visible [skip ci]'
+          git push
