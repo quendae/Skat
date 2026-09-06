@@ -28,6 +28,7 @@ jobs:
       - name: Syntax-check multiplayer client
         run: |
           node --check multiplayer-server.js
+          ! grep -q 'previousHost' multiplayer-server.js
           grep -q 'graceBySeat' multiplayer-server.js
           grep -q "message.type === 'game.player.bot_takeover'" multiplayer-server.js
           grep -q 'graceCountdownText' multiplayer-server.js
