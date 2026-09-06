@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/b2-presence-client-hardening.yml'
       - 'scripts/b2-presence-client-hardening.mjs'
+      - 'scripts/b2-presence-client-hardening-v2.mjs'
   workflow_dispatch:
 
 permissions:
@@ -20,7 +21,7 @@ jobs:
         with:
           node-version: '22'
       - name: Apply migration
-        run: node scripts/b2-presence-client-hardening.mjs
+        run: node scripts/b2-presence-client-hardening-v2.mjs
       - name: Verify syntax and smoke
         run: |
           node --check multiplayer-server.js
@@ -28,6 +29,7 @@ jobs:
           node tests/multiplayer_server_smoke.mjs
           grep -q 'multiplayer-server.js?v=20260906-b2p3' index.html
           grep -q "CLIENT_BUILD = '20260906-b2p3'" multiplayer-server.js
+          grep -q "message.type === 'game.presence'" multiplayer-server.js
           ! grep -q "type: 'game.state.commit'" multiplayer-server.js
           ! grep -q "type: 'game.state.publish'" multiplayer-server.js
       - name: Commit generated changes
