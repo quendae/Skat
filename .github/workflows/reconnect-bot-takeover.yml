@@ -1,0 +1,39 @@
+name: Reconnect bot takeover
+
+on:
+  push:
+    paths:
+      - '.github/workflows/reconnect-bot-takeover.yml'
+      - 'scripts/add-reconnect-bot-takeover.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply reconnect/bot takeover migration
+        run: node scripts/add-reconnect-bot-takeover.mjs
+      - name: Verify syntax and markers
+        run: |
+          node --check multiplayer-server.js
+          grep -q 'graceBySeat' multiplayer-server.js
+          grep -q 'game.player.bot_takeover' multiplayer-server.js
+          grep -q 'graceDeadline' multiplayer-server.js
+      - name: Commit generated client update
+        run: |
+          if git diff --quiet; then
+            echo 'No reconnect migration changes needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add multiplayer-server.js
+          git commit -m 'feat: add 60s reconnect grace and bot takeover [skip ci]'
+          git push
