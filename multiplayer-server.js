@@ -421,10 +421,6 @@
     }
     mp.names = [0, 1, 2].map((seat) => room.players?.[seat]?.nickname || (mp.botSeats.includes(seat) ? hybridCopy().botName : ''));
 
-    if (mp.inGame && previousHost && previousHost !== room.ownerSessionId) {
-      networkInterrupted('Gospodarz opuścił grę. To rozdanie nie może być bezpiecznie kontynuowane.');
-      return;
-    }
 
     renderLobby();
     if (mp.role === 'host') {
